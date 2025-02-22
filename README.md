@@ -1,5 +1,11 @@
 # Clip-Generator-AB-Test
 
+## Google doc
+
+[Google Doc](https://docs.google.com/document/d/1bOnIdPGhDHB_Nl-u1p_v7Dn0aMATKQhH4lao0ZH_BjA/edit?tab=t.0)
+
+## Task distribution
+
 Podcast Clip Generator + Automated AB testing
 
 Task A.1 = Extract Transcription from input content
