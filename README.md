@@ -34,7 +34,7 @@ This will create a `Pipfile` in your project directory. This file is used to man
 To install the packages your project needs, use the following command:
 
 ```bash
-pipenv install <package_name>
+pipenv run pip install elevenlabs
 ```
 
 Replace `<package_name>` with the library or package you want to install (e.g., `numpy`, `pandas`, etc.).
