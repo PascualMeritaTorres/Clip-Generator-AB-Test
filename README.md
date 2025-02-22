@@ -4,6 +4,85 @@
 
 [Google Doc](https://docs.google.com/document/d/1bOnIdPGhDHB_Nl-u1p_v7Dn0aMATKQhH4lao0ZH_BjA/edit?tab=t.0)
 
+Sure! Here’s an updated version of your README with all the necessary steps for using Pipenv to create a shared environment:
+
+---
+
+## Environment Management with Pipenv
+
+### Setup Instructions for Collaborative Environment
+
+#### 1. Install Pipenv
+
+First, ensure that you have Pipenv installed on your local machine. If you don’t have it, you can install it via pip:
+
+```bash
+pip install pipenv
+```
+
+#### 2. Create a Virtual Environment (No need as its already done)
+
+Navigate to your project directory and initialize a new virtual environment using Pipenv:
+
+```bash
+cd /path/to/your/project
+pipenv install
+```
+
+This will create a `Pipfile` in your project directory. This file is used to manage your project's dependencies.
+
+#### 3. Install Project Dependencies
+
+To install the packages your project needs, use the following command:
+
+```bash
+pipenv install <package_name>
+```
+
+Replace `<package_name>` with the library or package you want to install (e.g., `numpy`, `pandas`, etc.).
+
+#### 4. Generate `requirements.txt`
+
+If you need a `requirements.txt` file (for example, to share with other environments), you can generate it using:
+
+```bash
+pipenv lock -r > requirements.txt
+```
+
+This will create a `requirements.txt` file with the exact versions of all your dependencies, ensuring consistency across all environments.
+
+#### 5. Share the Environment
+
+To share the environment with your teammates:
+
+- **Share the `Pipfile` and `Pipfile.lock`**: These files contain your project's dependencies and their specific versions. Share them with your team so they can replicate the same environment.
+
+- **Instruct your teammates to install dependencies**: Teammates can set up the environment by running the following command in the project directory:
+
+```bash
+pipenv install
+```
+
+This will install all the dependencies specified in the `Pipfile`.
+
+### 6. Activate the Virtual Environment
+
+To activate the virtual environment and work within it, use:
+
+```bash
+pipenv shell
+```
+
+Your command prompt will change to indicate that the virtual environment is now active.
+
+### 7. Deactivate the Virtual Environment
+
+Once you're done working in the virtual environment, you can deactivate it by simply typing:
+
+```bash
+exit
+```
+
 ## Task distribution
 
 Podcast Clip Generator + Automated AB testing
