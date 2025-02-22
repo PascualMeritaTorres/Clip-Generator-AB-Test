@@ -1,12 +1,10 @@
 # Clip-Generator-AB-Test
 
-## Google doc
+## Documentation
 
-[Google Doc](https://docs.google.com/document/d/1bOnIdPGhDHB_Nl-u1p_v7Dn0aMATKQhH4lao0ZH_BjA/edit?tab=t.0)
+[Project's Google Doc](https://docs.google.com/document/d/1bOnIdPGhDHB_Nl-u1p_v7Dn0aMATKQhH4lao0ZH_BjA/edit?tab=t.0)
 
-Sure! Here’s an updated version of your README with all the necessary steps for using Pipenv to create a shared environment:
-
----
+[Hackathon's Docs](https://docs.google.com/document/d/1fsxiceA97FyWSx8uWC0ulPF6cY7Biusy0dgbcHdMzlk/edit?pli=1&tab=t.0)
 
 ## Environment Management with Pipenv
 
@@ -50,20 +48,6 @@ pipenv lock -r > requirements.txt
 ```
 
 This will create a `requirements.txt` file with the exact versions of all your dependencies, ensuring consistency across all environments.
-
-#### 5. Share the Environment
-
-To share the environment with your teammates:
-
-- **Share the `Pipfile` and `Pipfile.lock`**: These files contain your project's dependencies and their specific versions. Share them with your team so they can replicate the same environment.
-
-- **Instruct your teammates to install dependencies**: Teammates can set up the environment by running the following command in the project directory:
-
-```bash
-pipenv install
-```
-
-This will install all the dependencies specified in the `Pipfile`.
 
 ### 6. Activate the Virtual Environment
 
