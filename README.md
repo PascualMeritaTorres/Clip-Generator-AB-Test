@@ -103,3 +103,7 @@ Clerk - https://docingest.com/docs/clerk.com
 Mistral - https://docingest.com/docs/docs.mistral.ai
 
 Picaos - https://docingest.com/docs/docs.picaos.com
+
+# Upload videos to youtube
+
+https://videoflo.app/tutorial/
