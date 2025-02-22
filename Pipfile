@@ -4,6 +4,15 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
+elevenlabs = "*"
+pydub = "*"
+openai = "*"
+pillow = "*"
+opencv-python = "*"
+requests = "*"
+python-dotenv = "*"
+fal-client = "*"
+moviepy = "*"
 
 [dev-packages]
 
