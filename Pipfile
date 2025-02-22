@@ -13,7 +13,6 @@ requests = "*"
 python-dotenv = "*"
 fal-client = "*"
 moviepy = "*"
-
 [dev-packages]
 
 [requires]
