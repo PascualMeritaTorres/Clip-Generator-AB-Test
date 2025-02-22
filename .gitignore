@@ -34,7 +34,6 @@ ENV/
 
 # Audio files
 *.wav
-*.mp3
 *.ogg
 *.m4a
 *.flac
