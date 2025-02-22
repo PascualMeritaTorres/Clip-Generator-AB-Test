@@ -9,10 +9,29 @@ import json
 
 class AudioGenerator:
     """
+    AudioGenerator is a class responsible for generating audio files from text transcriptions using the ElevenLabs API.
 
+    Attributes:
+        client (ElevenLabs): An instance of the ElevenLabs client initialized with the API key.
+        voices (dict): A dictionary to store the mapping of speaker names to their corresponding voice IDs.
+        voice_designer (VoiceDesigner): An instance of the VoiceDesigner class used to create new voices.
+
+    Methods:
+        __init__():
+            Initializes the AudioGenerator instance with the ElevenLabs client and VoiceDesigner.
+
+        _generate_voices(data):
+            Generates or retrieves voices for each speaker in the provided data.
+
+        _generate_audio(voice_id, text):
+            Converts the given text to speech using the specified voice ID and returns the audio result.
+
+        generate_audio_from_transcriptions(data, output_dir, pause_duration_ms=500):
+            Generates audio files from the provided transcriptions and saves them to the specified output directory.
     """
 
     def __init__(self):
+        self.nice_voice_ids = ["NOpBlnGInO9m6vDvFkFC", "UgBBYS2sOqTuMpoF3BR0", "56AoDkrOh6qfVPDXZ7Pt"]
         self.client = ElevenLabs(
             api_key=os.getenv("ELEVENLABS_API_KEY"),
         )
@@ -53,8 +72,14 @@ class AudioGenerator:
         print(f"_generate_audio took {end_time - start_time:.2f} seconds")
         return result
 
-    def generate_audio_from_transcriptions(self, data, output_dir, pause_duration_ms=500):
-        self._generate_voices(data)
+    def generate_audio_from_transcriptions(self, data, output_dir, pause_duration_ms=500, preset_voices=False):
+        self._generate_voices(data)  # Ensure voices are populated before using preset voices
+        if preset_voices:
+            print("Using preset voices")
+            for i, speaker in enumerate(self.voices):
+                self.voices[speaker] = self.nice_voice_ids[i % len(self.nice_voice_ids)]
+        else:
+            self._generate_voices(data)
         output_files = []
         silence = AudioSegment.silent(duration=pause_duration_ms)  # Create a silence segment
 
@@ -93,4 +118,4 @@ if __name__ == "__main__":
     ag = AudioGenerator()
     with open('transcription.json', 'r') as file:
         data = json.load(file)
-    ag.generate_audio_from_transcriptions(data, "audio_generation_output")
+    ag.generate_audio_from_transcriptions(data, "audio_generation_output", preset_voices=True)
