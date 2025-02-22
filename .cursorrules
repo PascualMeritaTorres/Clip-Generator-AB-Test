@@ -1,0 +1,12 @@
+ - Always start from first principles.
+ - Always use the internet or the text passed as context to find information about docs. Prioritise the documentation and their recommended uses
+ - Use type hinting and docstrings to describe the code.
+ - Keep code modular and well-organised.
+ - Always do asserts to make sure that we are receiving the correct data types
+ - Always do asserts to make sure that we are returning the correct data types
+ - Always do asserts to make sure that the returned values from other functions are of the correct data types and number of elements
+ - Start always from the minimum amount of code that is needed to solve the problem following the above instruction, and only from then expect the user to give new features.
+ - If a code has comments, in the new version, keep the comments, even if they are rough.
+
+ - Use ElevenLabs to generate sound effects, generate audio from text, generate text from audio. Always refer to the documentation before implementing something to ensure the syntax is correct.
+ 

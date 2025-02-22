@@ -89,3 +89,17 @@ A = Iñaki
 B = Mike
 C = Pascu + Iñaki
 D = jesus
+
+# Docs
+
+Elevenlabs - https://docingest.com/docs/elevenlabs.io
+
+Lovable Dev - https://docingest.com/docs/docs.lovable.dev
+
+Fal.ai - https://docingest.com/docs/docs.fal.ai
+
+Clerk - https://docingest.com/docs/clerk.com
+
+Mistral - https://docingest.com/docs/docs.mistral.ai
+
+Picaos - https://docingest.com/docs/docs.picaos.com
