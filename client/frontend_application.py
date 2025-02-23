@@ -9,12 +9,16 @@ sys.path.insert(0, str(PROJECT_ROOT))
 # Rest of the imports
 import streamlit as st
 from services.db_services import DbServices
+
 # Comment out the import since we're ignoring authentication
 # from config import get_authenticated_service
 from services.backend_services import BackendServices
 import tempfile
 import asyncio
 from input_handling.input_processor import InputProcessor
+from youtube_interaction.youtube_receiver import YoutubeReceiver
+from youtube_interaction.youtube_uploader import YoutubeUploader
+from youtube_interaction.config import get_authenticated_service
 from content_generation.content_generation import main as generate_content_variations
 from speech_generation.generate_audio import AudioGenerator
 
@@ -24,14 +28,19 @@ DEMO_ASSETS_DIR = Path(__file__).parent / "demo_assets"
 OUTPUTS_DIR = Path(__file__).parent / "outputs"
 
 def main():
+    if "youtube_authenticated_client" not in st.session_state:
+        st.session_state.youtube_authenticated_client = None
     # Sidebar navigation
     st.sidebar.title("Virl Labs")
     st.sidebar.markdown("## Menu")
     page = st.sidebar.radio("Go to", ["Content Lab", "Analytics"])
 
     if page == "Content Lab":
+        if st.session_state.youtube_authenticated_client is None:
+            st.session_state.youtube_authenticated_client = get_authenticated_service()
         st.title("Welcome to Virl Labs")
-        st.markdown("""
+        st.markdown(
+            """
         ### Transform Your Podcasts into Viral Short-Form Content
         
         Upload your podcast audio and let our AI:
@@ -41,7 +50,8 @@ def main():
         - 🖼️ Match with compelling visuals
         - 📊 A/B test performance
         - 🧠 Self-improve through performance analytics to optimize future content
-        """)
+        """
+        )
 
         # File uploader section
         uploaded_file = st.file_uploader("Upload your file", type=["mp3", "mp4", "wav"])
@@ -63,75 +73,97 @@ def main():
                 num_clips = st.slider("Number of clips to generate", 1, 10, 3)
                 variations_per_clip = st.slider("Variations per clip", 1, 5, 2)
             with col2:
-                platform = st.selectbox("Target Platform", 
-                                      ["YouTube Shorts", "TikTok", "Instagram Reels"],
-                                      index=0)  # Set YouTube Shorts as default
-                content_style = st.selectbox("Content Style", 
-                                           ["Educational", "Entertaining", "News", "Commentary"],
-                                           index=0)  # Set Educational as default
+                platform = st.selectbox(
+                    "Target Platform",
+                    ["YouTube Shorts", "TikTok", "Instagram Reels"],
+                    index=0,
+                )  # Set YouTube Shorts as default
+                content_style = st.selectbox(
+                    "Content Style",
+                    ["Educational", "Entertaining", "News", "Commentary"],
+                    index=0,
+                )  # Set Educational as default
 
             # Create temporary file
-            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp_file:
+            with tempfile.NamedTemporaryFile(
+                delete=False, suffix=os.path.splitext(uploaded_file.name)[1]
+            ) as tmp_file:
                 tmp_file.write(uploaded_file.getvalue())
                 temp_path = tmp_file.name
 
             try:
                 # Process audio files
-                if uploaded_file.type in ["audio/mpeg", "audio/mp3", "audio/wav", "video/mp4"]:
+                if uploaded_file.type in [
+                    "audio/mpeg",
+                    "audio/mp3",
+                    "audio/wav",
+                    "video/mp4",
+                ]:
+                    # Create temporary file
                     st.audio(uploaded_file)
                     if st.button("🚀 Generate Viral Variations"):
                         with st.spinner("Processing your content..."):
+                            temp_path = None
+                            with tempfile.NamedTemporaryFile(
+                                delete=False,
+                                suffix=os.path.splitext(uploaded_file.name)[1],
+                            ) as tmp_file:
+                                tmp_file.write(uploaded_file.getvalue())
+                                temp_path = tmp_file.name
                             processor = InputProcessor()
-                            transcription = processor.process_input(temp_path, uploaded_file.type)
+                            transcription = processor.process_input(
+                                temp_path, uploaded_file.type
+                            )
                             if transcription:
                                 st.success("Content processed successfully!")
-                                
+
                                 # Display the transcription
                                 st.markdown("### Transcription")
                                 st.text(transcription)
-                                
+
                                 # Generate content variations
                                 with st.spinner("Generating viral variations..."):
-                                    variations = generate_content_variations(transcription)
-                                    
-                                    # Create temporary directory for audio files
-                                    with tempfile.TemporaryDirectory() as temp_audio_dir:
-                                        # Process variations to audio
-                                        with st.spinner("Generating audio for variations..."):
-                                            audio_results = asyncio.run(
-                                                process_variations_to_audio(variations, temp_audio_dir)
+                                    variations = generate_content_variations(
+                                        transcription
+                                    )
+
+                                    # Display generated variations
+                                    st.markdown("### Generated Content Variations")
+                                    for i, variation in enumerate(variations, 1):
+                                        with st.expander(
+                                            f"Variation {i}", expanded=True
+                                        ):
+                                            # Display transcription
+                                            st.markdown("#### Script")
+                                            for segment in variation["transcription"]:
+                                                st.markdown(
+                                                    f"**{segment['speaker']}:** {segment['text']}"
+                                                )
+
+                                            # Display voice descriptions
+                                            st.markdown("#### Voice Descriptions")
+                                            for speaker, desc in variation[
+                                                "speaker_voice_descriptions"
+                                            ].items():
+                                                st.markdown(f"**{speaker}:** {desc}")
+
+                                            # Display metadata
+                                            st.markdown("#### Content Details")
+                                            st.markdown(
+                                                f"**Title:** {variation['params']['title']}"
                                             )
-                                        
-                                        # Display generated variations with audio
-                                        st.markdown("### Generated Content Variations")
-                                        for i, (variation, audio_result) in enumerate(zip(variations, audio_results), 1):
-                                            with st.expander(f"Variation {i}", expanded=True):
-                                                # Display transcription
-                                                st.markdown("#### Script")
-                                                for segment in variation['transcription']:
-                                                    st.markdown(f"**{segment['speaker']}:** {segment['text']}")
-                                                
-                                                # Display voice descriptions
-                                                st.markdown("#### Voice Descriptions")
-                                                for speaker, desc in variation['speaker_voice_descriptions'].items():
-                                                    st.markdown(f"**{speaker}:** {desc}")
-                                                
-                                                # Display metadata
-                                                st.markdown("#### Content Details")
-                                                st.markdown(f"**Title:** {variation['params']['title']}")
-                                                st.markdown(f"**Description:** {variation['params']['description']}")
-                                                st.markdown(f"**Modifications:** {variation['params']['modifications']}")
-                                                st.markdown(f"**Summary:** {variation['params']['short_modifications']}")
-                                                st.markdown(f"**ID:** {variation['params']['id']}")
-                                                
-                                                # Display audio player
-                                                audio_path = list(audio_result.keys())[0]  # Get the audio file path
-                                                with open(audio_path, 'rb') as audio_file:
-                                                    st.audio(audio_file.read(), format='audio/mp3')
-                                                
-                                                # Display timing alignments
-                                                st.markdown("#### Audio Timing Alignments")
-                                                st.json(list(audio_result.values())[0])  # Show timing alignments
+                                            st.markdown(
+                                                f"**Description:** {variation['params']['description']}"
+                                            )
+                                            st.markdown(
+                                                f"**Modifications:** {variation['params']['modifications']}"
+                                            )
+                                            st.markdown(
+                                                f"**Summary:** {variation['params']['short_modifications']}"
+                                            )
+                                            st.markdown(
+                                                f"**ID:** {variation['params']['id']}"
+                                            )
                             else:
                                 st.error("Failed to process content. Please try again.")
 
@@ -141,16 +173,18 @@ def main():
 
     elif page == "Analytics":
         st.title("Performance Analytics 📈")
-        
+
         # Get data from the database
         db_services = DbServices()
         db_data = db_services.get_db_data()
 
         # Analytics Overview
         st.markdown("### Content Performance Overview")
-        
+
         if not db_data.get("videos", []):
-            st.info("No content has been published yet. Generate some variations to get started!")
+            st.info(
+                "No content has been published yet. Generate some variations to get started!"
+            )
         else:
             # Add metrics overview
             col1, col2, col3, col4 = st.columns(4)
@@ -168,14 +202,22 @@ def main():
                 with st.expander(f"📊 {video['video_name']}", expanded=False):
                     col1, col2, col3 = st.columns([2, 2, 1])
                     col1.markdown(f"**ID:** {video['video_id']}")
-                    col2.markdown(f"**Performance Score:** {video.get('performance_score', 'N/A')}")
+                    col2.markdown(
+                        f"**Performance Score:** {video.get('performance_score', 'N/A')}"
+                    )
                     if col3.button("View Analytics", key=video["video_id"]):
-                        backend_services = BackendServices()
-                        video_details = backend_services.get_video_with_id_service(
+                        youtube_receiver = YoutubeReceiver(
+                            output_dir="output",
+                            youtube_authenticated_client=st.session_state.youtube_authenticated_client,
+                        )
+                        video_details = youtube_receiver.get_video_details(
                             video_id=video["video_id"]
                         )
-                        st.write("### Detailed Analytics")
-                        st.json(video_details)
+                        if video_details is None:
+                            st.write("Video not found.")
+                        else:
+                            st.write("### Detailed Analytics")
+                            st.json(video_details)
 
 
 async def process_variations_to_audio(variations, output_dir):

@@ -81,6 +81,7 @@ async def main() -> None:
     topics_time = time.time() - topics_start_time
     logging.info(f"Topics generated and saved to {TOPICS_OUTPUT_FILE}. Time taken: {topics_time:.2f} seconds.")
 
+    """
     # Step 2: Generate audio with sound effects.
     sound_start_time = time.time()
     logging.info("Processing sound effects on audio...")
@@ -89,12 +90,13 @@ async def main() -> None:
     await asyncio.to_thread(save_audio, audio_effects, AUDIO_WITH_EFFECTS)
     sound_time = time.time() - sound_start_time
     logging.info(f"Audio with sound effects saved to {AUDIO_WITH_EFFECTS}. Time taken: {sound_time:.2f} seconds.")
+    """
 
     # Step 3: Create video using images.
     # Use the sound effects audio as input for the video generation.
     images_start_time = time.time()
     logging.info("Generating video with images...")
-    await asyncio.to_thread(process_video_with_images, AUDIO_WITH_EFFECTS, VIDEO_WITH_IMAGES)
+    await asyncio.to_thread(process_video_with_images, AUDIO_INPUT, VIDEO_WITH_IMAGES)
     images_time = time.time() - images_start_time
     logging.info(f"Video with images saved to {VIDEO_WITH_IMAGES}. Time taken: {images_time:.2f} seconds.")
 

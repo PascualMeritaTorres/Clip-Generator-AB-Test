@@ -162,27 +162,32 @@ def build_drawtext_filters(captions: List[Dict[str, Any]]) -> str:
     filter_parts = []
     
     for caption in captions:
-        start_time = float(caption["start_time"])
-        end_time = float(caption["end_time"])
+        # Ensure timestamps are properly formatted with decimal points
+        start_time = f"{float(caption['start_time']):.3f}"
+        end_time = f"{float(caption['end_time']):.3f}"
         text = str(caption["text"])
         escaped_text = escape_text(text)
         
-        # Updated drawtext filter with border instead of box and shadow
+        # Updated drawtext filter with proper timestamp formatting
         drawtext_filter = (
-            f"drawtext=fontfile='{FONT_FILE}':"
-            f"text='{escaped_text}':"
-            f"fontcolor={FONT_COLOR}:fontsize={FONT_SIZE}:"
-            f"bordercolor={BORDER_COLOR}:borderw={BORDER_WIDTH}:"
-            f"x={TEXT_X}:y={TEXT_Y}:"
-            f"enable='between(t,{start_time},{end_time})'"
+            f"drawtext=fontfile='{FONT_FILE}'"
+            f":text='{escaped_text}'"
+            f":fontcolor={FONT_COLOR}"
+            f":fontsize={FONT_SIZE}"
+            f":bordercolor={BORDER_COLOR}"
+            f":borderw={BORDER_WIDTH}"
+            f":x={TEXT_X}"
+            f":y={TEXT_Y}"
+            f":enable='between(t,{start_time},{end_time})'"
         )
         filter_parts.append(drawtext_filter)
     
-    # Chain all drawtext filters using a comma
+    # Join filters with comma and ensure no empty parts
     filter_chain = ",".join(filter_parts)
     
-    # Assert that the filter chain is a non-empty string
+    # Validate filter chain
     assert isinstance(filter_chain, str) and len(filter_chain) > 0, "Filter chain was not constructed correctly"
+    logging.debug(f"Generated filter chain: {filter_chain[:100]}...")  # Log first 100 chars
     
     return filter_chain
 
@@ -197,13 +202,19 @@ def process_video_with_text_overlay(input_video: str, transcription_path: str, o
     """
     assert os.path.exists(input_video), f"Input video file not found: {input_video}"
     
+    # Load and validate captions
     captions = load_transcription(transcription_path)
     logging.info(f"Loaded {len(captions)} transcription captions")
     
-    filter_chain = build_drawtext_filters(captions)
-    logging.info("Constructed FFmpeg drawtext filter chain")
+    # Build filter chain with proper error handling
+    try:
+        filter_chain = build_drawtext_filters(captions)
+        logging.info("Constructed FFmpeg drawtext filter chain")
+    except Exception as e:
+        logging.error(f"Error building filter chain: {e}")
+        raise
     
-    # Build the FFmpeg command. We use '-c:a copy' to copy the audio stream.
+    # Build the FFmpeg command with explicit format options
     ffmpeg_cmd = [
         "ffmpeg", "-y",
         "-i", input_video,
@@ -211,17 +222,24 @@ def process_video_with_text_overlay(input_video: str, transcription_path: str, o
         "-c:v", "libx264",
         "-preset", "ultrafast",
         "-crf", "23",
-        "-c:a", "copy",  # Copy audio stream without re-encoding
+        "-c:a", "copy",
+        "-max_muxing_queue_size", "1024",  # Added to handle complex filter chains
         output_video
     ]
     
     try:
-        result = subprocess.run(ffmpeg_cmd, check=True, capture_output=True, text=True)
+        # Run FFmpeg with proper error handling
+        result = subprocess.run(
+            ffmpeg_cmd,
+            check=True,
+            capture_output=True,
+            text=True
+        )
         logging.info(f"FFmpeg output: {result.stdout}")
         logging.info(f"Video with text overlay saved to {output_video}")
     except subprocess.CalledProcessError as e:
         logging.error(f"FFmpeg error: {e.stderr}")
-        raise
+        raise RuntimeError(f"FFmpeg failed: {e.stderr}")
 
 def main() -> None:
     """Main function to process video overlay."""

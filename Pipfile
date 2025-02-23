@@ -13,6 +13,10 @@ requests = "*"
 python-dotenv = "*"
 fal-client = "*"
 moviepy = "*"
+streamlit = "*"
+google-api-python-client = "*"
+google-auth-oauthlib = "*"
+
 [dev-packages]
 
 [requires]

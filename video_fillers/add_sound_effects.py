@@ -365,6 +365,7 @@ def normalize_text(text: str) -> str:
 def get_sequential_topic_timestamps(topic_words, timestamp_data):
     """
     Get start and end timestamps for each topic based on sequential word matching.
+    Handles contractions and apostrophes flexibly.
     
     Args:
         topic_words (dict): Dictionary mapping topic names to lists of words
@@ -374,39 +375,64 @@ def get_sequential_topic_timestamps(topic_words, timestamp_data):
         dict: Dictionary mapping topic names to (start_time, end_time) tuples
     """
     def clean_word(word):
-        # Remove punctuation from word
-        return ''.join(c for c in word if c.isalnum() or c.isspace()).lower()
+        # Remove punctuation but preserve apostrophes for contractions
+        cleaned = word.lower()
+        # Handle special cases for contractions
+        cleaned = cleaned.replace("'s", "s")  # Convert "there's" to "theres"
+        cleaned = cleaned.replace("'ll", "ll")  # Convert "it'll" to "itll"
+        # Remove any remaining punctuation
+        cleaned = ''.join(c for c in cleaned if c.isalnum() or c.isspace())
+        return cleaned
     
+    def find_word_match(target_word, timestamp_words):
+        """Find matching word considering contractions and combined words"""
+        target_clean = clean_word(target_word)
+        
+        # Try direct match first
+        for i, item in enumerate(timestamp_words):
+            if clean_word(item['word']) == target_clean:
+                return float(item['timestamp'])
+            
+        # Try matching contractions by combining consecutive words
+        if "'" in target_word:  # If target is a contraction
+            for i in range(len(timestamp_words) - 1):
+                combined = timestamp_words[i]['word'] + timestamp_words[i + 1]['word']
+                if clean_word(combined) == target_clean:
+                    return float(timestamp_words[i]['timestamp'])
+        
+        return None
+
     topic_timestamps = {}
     
     for topic_name, words in topic_words.items():
         logging.debug(f"Processing topic: {topic_name} with {len(words)} words")
         
-        # Clean the topic words
-        clean_topic_words = [clean_word(w) for w in words]
-        
-        # Create cleaned timestamp words for matching
-        clean_timestamp_words = [clean_word(item['word']) for item in timestamp_data]
-        
         start_time = None
         end_time = None
         
         # Find the first word
-        first_word = clean_topic_words[0]
-        last_word = clean_topic_words[-1]
+        first_word = words[0]
+        last_word = words[-1]
         
-        for i, item in enumerate(timestamp_data):
-            if clean_word(item['word']) == first_word:
-                start_time = float(item['timestamp'])
-                break
+        start_time = find_word_match(first_word, timestamp_data)
+        end_time = find_word_match(last_word, timestamp_data)
         
-        # Find the last word
-        for item in timestamp_data:
-            if clean_word(item['word']) == last_word:
-                end_time = float(item['timestamp'])
-                
-        assert start_time is not None, f"Could not find timestamp for first word '{words[0]}' in topic '{topic_name}'"
-        assert end_time is not None, f"Could not find timestamp for last word '{words[-1]}' in topic '{topic_name}'"
+        if start_time is None:
+            # Try finding the next available word if first word fails
+            for word in words[1:]:
+                start_time = find_word_match(word, timestamp_data)
+                if start_time is not None:
+                    break
+                    
+        if end_time is None:
+            # Try finding the previous word if last word fails
+            for word in reversed(words[:-1]):
+                end_time = find_word_match(word, timestamp_data)
+                if end_time is not None:
+                    break
+        
+        assert start_time is not None, f"Could not find timestamp for any words at start of topic '{topic_name}'"
+        assert end_time is not None, f"Could not find timestamp for any words at end of topic '{topic_name}'"
         
         topic_timestamps[topic_name] = (start_time, end_time)
         logging.debug(f"Topic '{topic_name}' timing: {start_time:.2f}s to {end_time:.2f}s")

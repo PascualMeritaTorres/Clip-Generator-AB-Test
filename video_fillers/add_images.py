@@ -8,7 +8,7 @@
 
 #output = X_audio_with_music_and_images
 
-from typing import List, Dict
+from typing import List, Dict, Tuple
 from dataclasses import dataclass
 import os
 import json
@@ -51,17 +51,43 @@ INTERPOLATION_FACTOR = 2.0  # Increased from 1.5 to generate more intermediate f
 # NEW HYPERPARAMETER: Set to False to disable saving images persistently. When False, images are saved into temporary files.
 SAVE_IMAGES = True
 
-# Prompt templates for easy modification
-IMAGE_GENERATION_PROMPT_TEMPLATE = (
-    "Generate a high quality, artistic image representing the concept of '{topic_name}' "
-    "depicted with elements that allude to the words: '{topic_words}' "
-    "in a vertical format suitable for social media. Use vivid colors, detailed textures, "
-    "and modern design elements. Do not include any text in the image. I repeat do NOT include text"
-)
+# Update the prompt template to be more story-focused
+STORY_CONTEXT_PROMPT = """You are a visual storytelling expert. I will provide you with a sequence of topics and their associated words from a video/audio script. 
+Your task is to create a cohesive visual narrative by generating image prompts that flow naturally from one topic to the next.
+
+For each topic, generate an artistic image prompt that will be passed to an AI image generation model and should:
+1. Capture the essence of the topic and its associated words
+2. Maintain visual consistency with the previous and next topics
+3. Follow a coherent color scheme and visual style
+4. Is suitable for vertical video format (9:16)
+5. Does not include any text elements
+
+Topics and their words:
+{topics_data}
+
+Respond with a JSON array of objects. Each object must have exactly these two fields:
+- "topic_name": The exact topic name as provided
+- "image_prompt": Your crafted prompt for image generation
+
+Keep each prompt focused and specific, around 2-3 sentences.
+
+Example of the exact JSON format required:
+[
+  {{
+    "topic_name": "Early Computers",
+    "image_prompt": "A vintage room bathed in warm amber light, featuring a massive early computer with glowing vacuum tubes and brass details. The composition draws the eye upward, with floating mathematical equations and circuit patterns creating a vertical flow in a retro-futuristic style."
+  }},
+  {{
+    "topic_name": "Digital Revolution",
+    "image_prompt": "Streams of luminous binary code cascading down like a digital waterfall against a deep blue backdrop, transforming into modern devices. Maintains the warm lighting accents from the previous scene while introducing cool cyber-blue elements."
+  }}
+]
+
+Important: Your response must be exactly in this JSON format, with no additional text before or after."""
 
 # Logging configuration
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
@@ -317,146 +343,282 @@ def get_word_timestamps(jsonl_path: str) -> List[Dict[str, str]]:
     print(f"[DEBUG] First few timestamps: {timestamps[:5]}")
     return timestamps
 
-def find_topic_timing(
-    topic_words: List[str], 
-    word_timestamps: List[Dict[str, str]], 
-    current_idx: int
-) -> tuple[float, float, int]:
+def normalize_word(word: str) -> str:
     """
-    Find start and end times for a topic based on its words, with flexible matching.
+    Normalize a word by removing punctuation and standardizing ellipsis.
     
     Args:
-        topic_words (List[str]): Words to find in the transcript
-        word_timestamps (List[Dict[str, str]]): Transcript with timestamps
-        current_idx (int): Starting index in word_timestamps
+        word (str): Word to normalize
         
     Returns:
-        tuple[float, float, int]: (start_time, end_time, next_index)
+        str: Normalized word
     """
-    # Initialize variables
-    start_time = None
-    end_time = None
-    idx = current_idx
-    words_found = 0
+    # Remove any whitespace
+    word = word.strip()
     
-    # Normalize words for comparison
-    normalized_topic_words = [w.lower() for w in topic_words]
-    print(f"\n[DEBUG] Looking for topic words: {normalized_topic_words}")
+    # Convert ellipsis variations to standard form
+    word = word.replace('...', '')
+    word = word.replace('..', '')
+    
+    # Remove punctuation except apostrophes
+    word = ''.join(c for c in word if c.isalnum() or c == "'")
+    
+    return word.lower()
+
+def find_topic_timing(topic_words: List[str], timestamp_data: List[Dict[str, str]], current_idx: int) -> Tuple[float, float, int]:
+    """
+    Find start and end timestamps for a topic by matching words.
+    
+    Args:
+        topic_words (List[str]): List of words in the topic
+        timestamp_data (List[Dict[str, str]]): List of word timestamps
+        current_idx (int): Current position in timestamp data
+        
+    Returns:
+        Tuple[float, float, int]: Start time, end time, and new current index
+    """
+    print(f"[DEBUG] Looking for topic words: {topic_words}")
     print(f"[DEBUG] Starting search from index {current_idx}")
     
-    # Function to reconstruct word from parts
-    def reconstruct_word(start_idx: int, max_tokens: int = 3) -> str:
-        """
-        Reconstruct a word from multiple tokens (e.g., "don't" from "don", "'", "t")
-        """
-        if start_idx >= len(word_timestamps):
-            return ""
-            
-        reconstructed = word_timestamps[start_idx]["word"].lower()
-        current_idx = start_idx + 1
-        tokens_used = 1
-        
-        while (tokens_used < max_tokens and 
-               current_idx < len(word_timestamps) and 
-               len(word_timestamps[current_idx]["word"]) <= 1):  # Only combine with small tokens
-            reconstructed += word_timestamps[current_idx]["word"].lower()
-            current_idx += 1
-            tokens_used += 1
-            
-        return reconstructed
-
-    while idx < len(word_timestamps) and words_found < len(topic_words):
-        # Try to match the current topic word
-        target_word = normalized_topic_words[words_found]
-        
-        # First try direct match
-        current_word = word_timestamps[idx]["word"].lower()
-        reconstructed_word = reconstruct_word(idx)
-        
-        print(f"[DEBUG] Comparing word {words_found}: '{current_word}' / '{reconstructed_word}' with '{target_word}'")
-        
-        # Check for match (either direct or reconstructed)
-        if current_word == target_word or reconstructed_word == target_word:
-            # Found matching word
-            if start_time is None:
-                start_time = float(word_timestamps[idx]["timestamp"])
-                print(f"[DEBUG] Found first word '{target_word}' at time {start_time}s")
-            
-            # For reconstructed words, get the timestamp of the last token
-            if reconstructed_word == target_word and len(reconstructed_word) > len(current_word):
-                # Skip the indices we used for reconstruction
-                tokens_to_skip = len(reconstructed_word) - len(current_word) + 1
-                end_time = float(word_timestamps[idx + tokens_to_skip - 1]["timestamp"])
-                idx += tokens_to_skip
-            else:
-                end_time = float(word_timestamps[idx]["timestamp"])
-                idx += 1
+    words_found = 0
+    start_time = None
+    end_time = None
+    i = current_idx
+    first_word_idx = None
+    
+    # Stop scanning once all topic words are found.
+    while i < len(timestamp_data) and words_found < len(topic_words):
+        for topic_idx, topic_word in enumerate(topic_words):
+            if words_found > topic_idx:
+                continue
                 
-            print(f"[DEBUG] Found word '{target_word}' at time {end_time}s")
-            words_found += 1
-        else:
-            idx += 1
+            timestamp_word = timestamp_data[i]['word']
             
-        # Add timeout check to prevent infinite loops
-        if idx >= len(word_timestamps):
-            print(f"[WARNING] Reached end of transcript while looking for '{target_word}'")
+            # Normalize both words for comparison
+            norm_topic_word = normalize_word(topic_word)
+            norm_timestamp_word = normalize_word(timestamp_word)
+            
+            print(f"[DEBUG] Comparing word {topic_idx}: '{timestamp_word}' / '{norm_timestamp_word}' with '{topic_word}'")
+            
+            # Handle contractions
+            if "'" in topic_word and i < len(timestamp_data) - 2:
+                # Try combining current word with next ones for contractions
+                combined = timestamp_word
+                look_ahead = 1
+                while look_ahead <= 2 and i + look_ahead < len(timestamp_data):
+                    combined += timestamp_data[i + look_ahead]['word']
+                    if normalize_word(combined) == norm_topic_word:
+                        if start_time is None:
+                            first_word_idx = i
+                            # For first word, get previous timestamp if not first topic
+                            if current_idx > 0 and i > 0:
+                                start_time = float(timestamp_data[i - 1]['timestamp'])
+                            else:
+                                start_time = float(timestamp_data[i]['timestamp'])
+                        end_time = float(timestamp_data[i + look_ahead]['timestamp'])
+                        words_found += 1
+                        i += look_ahead
+                        break
+                    look_ahead += 1
+            # Direct word match
+            elif norm_timestamp_word == norm_topic_word:
+                if start_time is None:
+                    first_word_idx = i
+                    # For first word, get previous timestamp if not first topic
+                    if current_idx > 0 and i > 0:
+                        start_time = float(timestamp_data[i - 1]['timestamp'])
+                    else:
+                        start_time = float(timestamp_data[i]['timestamp'])
+                end_time = float(timestamp_data[i]['timestamp'])
+                words_found += 1
+                print(f"[DEBUG] Found word '{topic_word}' at time {end_time}s")
+                break
+        # If we have matched all words, break early.
+        if words_found == len(topic_words):
             break
+        i += 1
     
     print(f"[DEBUG] Words found: {words_found}/{len(topic_words)}")
     
-    # More flexible assertion - allow partial matches if we found at least the first and last words
-    if words_found < 2:
-        raise AssertionError(f"Could not find enough words for topic. Found {words_found} of {len(topic_words)}")
-    
-    if start_time is None or end_time is None:
-        raise AssertionError("Could not determine topic timing")
-    
-    print(f"[DEBUG] Final timing - start: {start_time}s, end: {end_time}s")
-    print(f"[DEBUG] Next search will start from index {idx}\n")
-    
-    # Add a small buffer to end_time to avoid abrupt transitions
-    end_time = end_time + 0.5
-    
-    return start_time, end_time, idx
+    if words_found >= 1:
+        if end_time is None:
+            end_time = start_time
+            
+        # If this is the last word of the last topic, use the final timestamp
+        if i >= len(timestamp_data) - 1 or current_idx >= len(timestamp_data) - len(topic_words):
+            end_time = float(timestamp_data[-1]['timestamp'])
+            print(f"[DEBUG] Using final timestamp for last topic: {end_time}s")
+            
+        # Log the final timestamps being used
+        print(f"[DEBUG] Using timestamps for topic: start={start_time:.3f}s, end={end_time:.3f}s")
+        if first_word_idx is not None and first_word_idx > 0:
+            print(f"[DEBUG] First word '{timestamp_data[first_word_idx]['word']}' at {float(timestamp_data[first_word_idx]['timestamp']):.3f}s")
+            print(f"[DEBUG] Previous word '{timestamp_data[first_word_idx-1]['word']}' at {float(timestamp_data[first_word_idx-1]['timestamp']):.3f}s")
+            
+        # Advance pointer one more token if we're not at the end.
+        new_idx = i + 1 if i < len(timestamp_data) else i
+        return start_time, end_time, new_idx
+        
+    raise AssertionError(f"Could not find enough words for topic. Found {words_found} of {len(topic_words)}")
 
 @timer_decorator
-def generate_ai_image(topic_name: str, topic_words: List[str]) -> str:
+def generate_coherent_prompts(topics_list: List[tuple[str, List[str]]]) -> List[Dict[str, str]]:
     """
-    Generate an image for a given topic using AI text-to-image model via Fal AI.
+    Generate coherent image prompts for all topics using Claude.
     
     Args:
-        topic_name (str): The topic to generate the image for.
-        topic_words (List[str]): The actual words being said in the topic.
-    
+        topics_list: List of (topic_name, topic_words) pairs
+        
     Returns:
-        str: URL of the generated image.
-        
-    Raises:
-        AssertionError: If generation does not return a valid image URL.
+        List[Dict[str, str]]: List of dicts with topic names and their image prompts
     """
-    # Build the prompt by including the topic words
-    prompt = IMAGE_GENERATION_PROMPT_TEMPLATE.format(
-        topic_name=topic_name,
-        topic_words=", ".join(topic_words)
-    )
+    # Format topics data for Claude in a clearer way
+    topics_formatted = []
+    for topic_name, topic_words in topics_list:
+        topic_str = f"Topic: {topic_name}\nAssociated words: {', '.join(topic_words)}"
+        topics_formatted.append(topic_str)
     
-    def on_queue_update(update: fal_client.InProgress) -> None:
-        """Callback to log progress of image generation.
+    topics_data = "\n\n".join(topics_formatted)
+    
+    logging.info(f"Formatted topics for prompt:\n{topics_data}")
+    
+    # Call Claude via fal-ai to generate coherent prompts
+    try:
+        result = fal_client.subscribe(
+            "fal-ai/any-llm",
+            arguments={
+                "model": "anthropic/claude-3.5-sonnet",
+                "prompt": STORY_CONTEXT_PROMPT.format(topics_data=topics_data),
+                "system_prompt": "You are a visual storytelling expert who creates cohesive image generation prompts. Always respond with valid JSON."
+            }
+        )
         
-        Disabled logging to avoid printing HTTP request logs.
-        """
-        # Previously, log messages were printed. Now we do nothing.
-        pass
+        # Parse the JSON response from Claude
+        try:
+            prompts_data = json.loads(result["output"])
+            logging.info(f"Received response from Claude: {result['output']}")
+        except json.JSONDecodeError as e:
+            logging.error(f"Failed to parse JSON from Claude's response: {result['output']}")
+            raise
+        
+        # Validate the response format
+        assert isinstance(prompts_data, list), f"Expected list of prompts from Claude, got {type(prompts_data)}"
+        assert len(prompts_data) == len(topics_list), f"Mismatch in number of prompts. Expected {len(topics_list)}, got {len(prompts_data)}"
+        
+        for i, prompt in enumerate(prompts_data):
+            assert isinstance(prompt, dict), f"Expected dict for prompt {i}, got {type(prompt)}"
+            assert "topic_name" in prompt, f"Missing topic_name in prompt {i}"
+            assert "image_prompt" in prompt, f"Missing image_prompt in prompt {i}"
+            
+        return prompts_data
+        
+    except Exception as e:
+        logging.error(f"Error generating coherent prompts: {str(e)}")
+        logging.error(f"Full error details: {e}")
+        raise
 
+@timer_decorator
+def process_video_with_images(
+    audio_path: str,
+    output_path: str
+) -> None:
+    """Main function to process audio into video with images."""
+    total_start_time = time.time()
+    logging.info("Starting video creation process")
+    
+    # Load environment variables
+    try:
+        env_start_time = time.time()
+        env_path = find_env_file(os.path.dirname(__file__))
+        load_dotenv(env_path)
+        logging.info(f"Environment loading took {time.time() - env_start_time:.2f} seconds")
+    except FileNotFoundError as e:
+        logging.error(f"{e}")
+        raise
+    
+    # Load topics and word timestamps
+    topics_list = load_topics()
+    logging.info(f"Loaded {len(topics_list)} topics")
+    
+    # Generate coherent prompts for all topics
+    prompts_start_time = time.time()
+    coherent_prompts = generate_coherent_prompts(topics_list)
+    logging.info(f"Generated coherent prompts in {time.time() - prompts_start_time:.2f} seconds")
+    
+    word_timestamps = get_word_timestamps("audio_to_timestamp.jsonl")
+    
+    # Process each topic
+    topic_images = []
+    current_idx = 0
+    
+    for topic_index, ((topic_name, topic_words), prompt_data) in enumerate(zip(topics_list, coherent_prompts)):
+        topic_start_time = time.time()
+        logging.info(f"Processing topic {topic_index + 1}/{len(topics_list)}: {topic_name}")
+        
+        # Find timing for this topic
+        timing_start = time.time()
+        start_time, end_time, current_idx = find_topic_timing(
+            topic_words, 
+            word_timestamps, 
+            current_idx
+        )
+        logging.info(f"Topic timing calculation took {time.time() - timing_start:.2f} seconds")
+        
+        # Check if image already exists
+        image_exists, local_path = image_exists_for_topic(topic_name, topic_index)
+        
+        if not image_exists:
+            # Generate and download image using AI only if it doesn't exist
+            image_gen_start = time.time()
+            # Use the coherent prompt instead of generating a new one
+            image_url = generate_ai_image_with_prompt(prompt_data["image_prompt"])
+            logging.info(f"AI image generation took {time.time() - image_gen_start:.2f} seconds")
+            
+            download_start = time.time()
+            local_path = download_image(image_url, topic_name, topic_index)
+            logging.info(f"Image download and processing took {time.time() - download_start:.2f} seconds")
+        else:
+            logging.info(f"Using existing image for topic '{topic_name}' at {local_path}")
+            image_url = ""  # Empty string since we're using existing image
+        
+        topic_image = TopicImage(
+            topic_name=topic_name,
+            topic_index=topic_index,
+            image_url=image_url,
+            start_time=start_time,
+            end_time=end_time,
+            local_path=local_path
+        )
+        topic_images.append(topic_image)
+        logging.info(f"Total time for topic {topic_name}: {time.time() - topic_start_time:.2f} seconds")
+    
+    # Create video
+    video_start_time = time.time()
+    create_video_from_images(topic_images, audio_path, output_path)
+    logging.info(f"Video creation took {time.time() - video_start_time:.2f} seconds")
+    
+    total_time = time.time() - total_start_time
+    logging.info(f"Total processing time: {total_time:.2f} seconds")
+
+@timer_decorator
+def generate_ai_image_with_prompt(prompt: str) -> str:
+    """
+    Generate an image using the provided prompt via Fal AI.
+    
+    Args:
+        prompt (str): The detailed prompt for image generation
+        
+    Returns:
+        str: URL of the generated image
+    """
     result = fal_client.subscribe(
-        "fal-ai/flux-pro/v1.1-ultra-finetuned",
+        "fal-ai/flux-pro/v1.1-ultra",
         arguments={
             "prompt": prompt,
             "finetune_id": "",
             "finetune_strength": 1.0
         },
-        with_logs=True,
-        on_queue_update=on_queue_update
+        with_logs=True
     )
     
     # Ensure result is a dict with a valid 'images' key representing generated images
@@ -491,83 +653,6 @@ def image_exists_for_topic(topic_name: str, topic_index: int) -> tuple[bool, str
     logging.info(f"Checking for existing image at {image_path}: {'Found' if exists else 'Not found'}")
     
     return exists, image_path
-
-@timer_decorator
-def process_video_with_images(
-    audio_path: str,
-    output_path: str
-) -> None:
-    """Main function to process audio into video with images."""
-    total_start_time = time.time()
-    logging.info("Starting video creation process")
-    
-    # Load environment variables
-    try:
-        env_start_time = time.time()
-        env_path = find_env_file(os.path.dirname(__file__))
-        load_dotenv(env_path)
-        logging.info(f"Environment loading took {time.time() - env_start_time:.2f} seconds")
-    except FileNotFoundError as e:
-        logging.error(f"{e}")
-        raise
-    
-    # Load topics and word timestamps
-    topics_list = load_topics()
-    logging.info(f"Loaded {len(topics_list)} topics")
-    
-    word_timestamps = get_word_timestamps("audio_to_timestamp.jsonl")
-    
-    # Process each topic
-    topic_images = []
-    current_idx = 0
-    
-    for topic_index, (topic_name, topic_words) in enumerate(topics_list):
-        topic_start_time = time.time()
-        logging.info(f"Processing topic {topic_index + 1}/{len(topics_list)}: {topic_name}")
-        
-        # Find timing for this topic
-        timing_start = time.time()
-        start_time, end_time, current_idx = find_topic_timing(
-            topic_words, 
-            word_timestamps, 
-            current_idx
-        )
-        logging.info(f"Topic timing calculation took {time.time() - timing_start:.2f} seconds")
-        
-        # Check if image already exists
-        image_exists, local_path = image_exists_for_topic(topic_name, topic_index)
-        
-        if not image_exists:
-            # Generate and download image using AI only if it doesn't exist
-            image_gen_start = time.time()
-            image_url = generate_ai_image(topic_name, topic_words)
-            logging.info(f"AI image generation took {time.time() - image_gen_start:.2f} seconds")
-            
-            download_start = time.time()
-            local_path = download_image(image_url, topic_name, topic_index)
-            logging.info(f"Image download and processing took {time.time() - download_start:.2f} seconds")
-        else:
-            logging.info(f"Using existing image for topic '{topic_name}' at {local_path}")
-            image_url = ""  # Empty string since we're using existing image
-        
-        topic_image = TopicImage(
-            topic_name=topic_name,
-            topic_index=topic_index,
-            image_url=image_url,
-            start_time=start_time,
-            end_time=end_time,
-            local_path=local_path
-        )
-        topic_images.append(topic_image)
-        logging.info(f"Total time for topic {topic_name}: {time.time() - topic_start_time:.2f} seconds")
-    
-    # Create video
-    video_start_time = time.time()
-    create_video_from_images(topic_images, audio_path, output_path)
-    logging.info(f"Video creation took {time.time() - video_start_time:.2f} seconds")
-    
-    total_time = time.time() - total_start_time
-    logging.info(f"Total processing time: {total_time:.2f} seconds")
 
 if __name__ == "__main__":
     process_video_with_images(

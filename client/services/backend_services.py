@@ -1,7 +1,13 @@
+import os
 import requests
 
-
 BACKEND_URL = "http://localhost:8000"
+
+# Set the database root directory
+database_root_dir = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), os.pardir, os.pardir
+)
+os.chdir(database_root_dir)
 
 
 class BackendServices:

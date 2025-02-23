@@ -1,6 +1,6 @@
 from elevenlabs import ElevenLabs
 import os
-from voice_design import VoiceDesigner
+from .voice_design import VoiceDesigner
 import io
 from pydub import AudioSegment
 import time
@@ -32,8 +32,10 @@ class AudioGenerator:
 
     def __init__(self):
         self.nice_voice_ids = ["UgBBYS2sOqTuMpoF3BR0", "NOpBlnGInO9m6vDvFkFC", "56AoDkrOh6qfVPDXZ7Pt"]
+        # Get API key directly from environment variable
+        api_key = "sk_3be83bf3190fe51d1975ce49e36c63e403d51f3048046ce3"  # Replace with actual API key from .env
         self.client = ElevenLabs(
-            api_key=os.getenv("ELEVENLABS_API_KEY"),
+            api_key=api_key,
         )
         self.voices = {}
         self.voice_designer = VoiceDesigner()
@@ -97,7 +99,7 @@ class AudioGenerator:
                 for speaker_info in item["speaker_voice_descriptions"]:
                     speaker = speaker_info["speaker"]
                     description = speaker_info["description"]
-                    all_voices = await self.client.voices.get_all().voices
+                    all_voices = self.client.voices.get_all().voices
                     matched_voice = next((voice for voice in all_voices if voice.name == speaker), None)
 
                     if matched_voice:
@@ -107,8 +109,11 @@ class AudioGenerator:
                         if speaker not in self.voices:
                             speaker_text = "".join(t["text"] for t in item["transcription"] if t["speaker"] == speaker)
                             print(f"Creating new voice for speaker: {speaker}. Speaker text: {speaker_text}")
-                            self.voices[speaker] = await self.voice_designer.create_voice(voice_name=speaker,
-                                                                                          voice_description=description, text=speaker_text)
+                            self.voices[speaker] = await self.voice_designer.create_voice(
+                                voice_name=speaker,
+                                voice_description=description, 
+                                text=speaker_text
+                            )
                             print(f"Created new voice for speaker: {speaker}")
         end_time = time.time()
         print(f"_generate_voices took {end_time - start_time:.2f} seconds")

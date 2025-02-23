@@ -1,5 +1,7 @@
 import httplib2
 from http import client
+from googleapiclient.discovery import build
+from google_auth_oauthlib.flow import InstalledAppFlow
 
 # Explicitly tell the underlying HTTP transport library not to retry, since
 # we are handling retry logic ourselves.
@@ -41,3 +43,9 @@ API_SERVICE_NAME = "youtube"
 API_VERSION = "v3"
 
 VALID_PRIVACY_STATUSES = ("public", "private", "unlisted")
+
+
+def get_authenticated_service():
+        flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRETS_FILE, SCOPES)
+        credentials = flow.run_local_server()
+        return build(API_SERVICE_NAME, API_VERSION, credentials=credentials)

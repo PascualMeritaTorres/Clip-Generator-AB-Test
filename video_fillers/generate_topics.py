@@ -49,7 +49,7 @@ The words in each topic must appear in the exact same order as in the original t
 When concatenating all the words from all topics in order, it must reconstruct the original text exactly.
 
 Rules:
-1. Each topic should be a descriptive name capturing its meaning.
+1. Each topic should be a SINGLE descriptive word capturing its meaning.
 2. The words in each topic must be taken sequentially from the text.
 3. Every word from the original text must be included exactly once.
 4. The order of topics must match the text flow.
