@@ -1,7 +1,6 @@
 import httplib2
 from http import client
 
-
 # Explicitly tell the underlying HTTP transport library not to retry, since
 # we are handling retry logic ourselves.
 httplib2.RETRIES = 1
@@ -34,7 +33,10 @@ CLIENT_SECRETS_FILE = "client_secret.json"
 
 # This OAuth 2.0 access scope allows an application to upload files to the
 # authenticated user's YouTube channel, but doesn't allow other types of access.
-SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
+SCOPES = [
+    "https://www.googleapis.com/auth/youtube.upload",
+    "https://www.googleapis.com/auth/youtube",
+]
 API_SERVICE_NAME = "youtube"
 API_VERSION = "v3"
 
