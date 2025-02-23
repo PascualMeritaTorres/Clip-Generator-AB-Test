@@ -38,48 +38,6 @@ class AudioGenerator:
         self.voices = {}
         self.voice_designer = VoiceDesigner()
 
-    # def _generate_voices(self, data, preset_voices=False):
-    #     start_time = time.time()
-    #     if preset_voices:
-    #         print("Using preset voices")
-    #         speakers = {segment["speaker"] for item in data for segment in item["transcription"]}
-    #         for i, speaker in enumerate(speakers):
-    #             if speaker not in self.voices:
-    #                 self.voices[speaker] = self.nice_voice_ids[i % len(self.nice_voice_ids)]
-    #                 print(f"Assigned preset voice ID {self.voices[speaker]} to speaker {speaker}")
-    #     else:
-    #         for item in data:
-    #             for speaker_info in item["speaker_voice_descriptions"]:
-    #                 speaker = speaker_info["speaker"]
-    #                 description = speaker_info["description"]
-    #                 all_voices = self.client.voices.get_all().voices
-    #                 matched_voice = next((voice for voice in all_voices if voice.name == speaker), None)
-
-    #                 if matched_voice:
-    #                     self.voices[speaker] = matched_voice.voice_id
-    #                     print(f"Matched existing voice for speaker: {speaker}")
-    #                 else:
-    #                     if speaker not in self.voices:
-    #                         speaker_text = "".join(t["text"] for t in item["transcription"] if t["speaker"] == speaker)
-    #                         print(f"Creating new voice for speaker: {speaker}. Speaker text: {speaker_text}")
-    #                         self.voices[speaker] = self.voice_designer.create_voice(voice_name=speaker,
-    #                                                                                 voice_description=description, text=speaker_text)
-    #                         print(f"Created new voice for speaker: {speaker}")
-    #     end_time = time.time()
-    #     print(f"_generate_voices took {end_time - start_time:.2f} seconds")
-
-    # def _generate_audio(self, voice_id, text):
-    #     start_time = time.time()
-    #     result = self.client.text_to_speech.convert_with_timestamps(
-    #         voice_id=voice_id,
-    #         output_format="mp3_44100_128",
-    #         text=text,
-    #         model_id="eleven_turbo_v2_5"
-    #     )
-    #     end_time = time.time()
-    #     print(f"_generate_audio took {end_time - start_time:.2f} seconds")
-    #     return result
-
     async def generate_audio_from_transcriptions(self, data, output_dir, pause_duration_ms=500, preset_voices=False):
         await self._generate_voices(data, preset_voices=preset_voices)  # Ensure voices are populated before generating audio
         output_files = []
