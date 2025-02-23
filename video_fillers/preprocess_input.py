@@ -15,17 +15,9 @@ def load_mp3_timestamps(filepath: str) -> Dict:
     """
     with open(filepath, 'r') as f:
         data = json.load(f)
-    assert isinstance(data, list), "Input data must be a list"
+
     
-    # Get the first dictionary from the list
-    first_file_data = data[0]
-    
-    # Get the data for "audio_generation_output/transcription_0.mp3"
-    target_key = "audio_generation_output/transcription_0.mp3"
-    assert target_key in first_file_data, f"Could not find {target_key} in data"
-    
-    # The data is structured as a list of dictionaries
-    transcription_data = first_file_data[target_key]
+    transcription_data = data
     assert isinstance(transcription_data, list) and len(transcription_data) > 0, "Invalid transcription data format"
     
     return transcription_data[0]  # Return the first transcription segment
