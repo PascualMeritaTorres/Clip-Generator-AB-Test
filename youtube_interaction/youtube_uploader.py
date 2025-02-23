@@ -22,11 +22,12 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 class YoutubeUploader:
 
-    def __init__(self, data_dir: str):
+    def __init__(self, data_dir: str, youtube_authenticated_client):
         # Set the data folder
         self.data_dir = data_dir
         # Authorize the request and store authorization credentials.
-        self.youtube_client = self.get_authenticated_service()
+        self.youtube_authenticated_client = youtube_authenticated_client
+        # self.youtube_client = self.get_authenticated_service()
 
     # Authorize the request and store authorization credentials.
     def get_authenticated_service(self):
