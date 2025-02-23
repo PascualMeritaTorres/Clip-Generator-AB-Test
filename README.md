@@ -1,5 +1,67 @@
 # Clip-Generator-AB-Test
 
+## Structure
+
+The agent operates as a multi-component pipeline for automated content creation and optimization, organized in the following hierarchical structure:
+
+![Agent System Structure](docs_media/agent.png)
+
+### Core Processing Pipeline
+
+1. **Audio Transcriber**
+   - Entry point for audio content processing
+   - Converts audio input into processable text
+
+2. **Script Generator**
+   - AI-powered component
+   - Generates content scripts based on transcribed input
+   - Receives optimization feedback from the feedback loop
+
+3. **Voice Designer**
+   - Handles voice characteristics and parameters
+   - Prepares voice specifications for audio generation
+
+4. **Audio Generator**
+   - Converts scripts into spoken audio content
+   - Implements voice design specifications
+
+### Media Processing Layer
+
+5. **Media Generator**
+   - Central hub for all media asset creation
+   - Coordinates three parallel processes:
+     - **Sound Effect Generator**: Creates supplementary audio elements
+     - **Image Generator**: Produces visual content
+     - **Caption Generator**: Generates text overlays and captions
+
+### Distribution and Analytics Layer
+
+6. **YouTube Uploader**
+   - Handles content publication
+   - Manages upload parameters and scheduling
+   - Interfaces with YouTube's platform
+
+7. **Stats Analyzer**
+   - Processes performance metrics
+   - Tracks engagement and viewer statistics
+   - Provides data for optimization
+
+8. **Feedback Generator**
+   - Processes analytics data
+   - Generates optimization suggestions
+   - Creates a feedback loop to the Script Generator for content improvement
+
+### System Integration
+
+- The system implements a continuous feedback loop where performance data influences future content generation
+- Parallel processing capabilities in the media generation phase enable efficient resource utilization
+- AI integration at the script generation level ensures content adaptability
+- Multiple specialized generators ensure comprehensive content packaging
+
+This structure enables automated end-to-end content creation while maintaining quality through data-driven optimization and feedback incorporation.
+
+[You can find our videos here:](docs_media/final_video_with_text.mp4)
+
 ## Documentation
 
 [Project's Google Doc](https://docs.google.com/document/d/1bOnIdPGhDHB_Nl-u1p_v7Dn0aMATKQhH4lao0ZH_BjA/edit?tab=t.0)
@@ -8,15 +70,7 @@
 
 [Elevenlabs Documentation](https://docingest.com/docs/elevenlabs.io)
 
-[Lovable Dev Documentation](https://docingest.com/docs/docs.lovable.dev)
-
 [Fal.ai Documentation](https://docingest.com/docs/docs.fal.ai)
-
-[Clerk Documentation](https://docingest.com/docs/clerk.com)
-
-[Mistral Documentation](https://docingest.com/docs/docs.mistral.ai)
-
-[Picaos Documentation](https://docingest.com/docs/docs.picaos.com)
 
 ## Environment Management with Pipenv
 
@@ -37,6 +91,14 @@ Navigate to your project directory and initialize a new virtual environment usin
 ```bash
 cd /path/to/your/project
 pipenv install
+```
+
+### 2.b. Activate the Virtual Environment
+
+To activate the virtual environment and work within it, use:
+
+```bash
+pipenv shell
 ```
 
 This will create a `Pipfile` in your project directory. This file is used to manage your project's dependencies.
@@ -61,14 +123,6 @@ pipenv lock -r > requirements.txt
 
 This will create a `requirements.txt` file with the exact versions of all your dependencies, ensuring consistency across all environments.
 
-### 6. Activate the Virtual Environment
-
-To activate the virtual environment and work within it, use:
-
-```bash
-pipenv shell
-```
-
 Your command prompt will change to indicate that the virtual environment is now active.
 
 ### 7. Deactivate the Virtual Environment
@@ -79,29 +133,6 @@ Once you're done working in the virtual environment, you can deactivate it by si
 exit
 ```
 
-## Task distribution
-
-Podcast Clip Generator + Automated AB testing
-
-Task A.1 = Extract Transcription from input content
-Task A.2 = Generate Audio from M Variations
-Task B.1 = Generate text clips from input transcription
-Task B.2 = Generate text variants from text clips
-Task C.1 = Identify places to put music + what type of music + what specific track
-Task C.2 = Identify places to put sound effects + generate prompt for elevenlabs for sound effect
-Task C.3 = Identify main topics + Search internet for images
-Task C.4 = Put everything together
-Task D.1 = From a set of input videos, post them on tiktok
-Task D.2 = Analyse posted videos: overall views, like, comments (sentiment analysis)
-Task D.3 = Generate a report with the results and tell the user which one he should put more money on for example
-
-Task E = Generate the UI for all of this
-
-A = Iñaki
-B = Mike
-C = Pascu + Iñaki
-D = jesus
-
 # Upload videos to youtube
 
-https://videoflo.app/tutorial/
+<https://videoflo.app/tutorial/>
