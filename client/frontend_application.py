@@ -1,19 +1,27 @@
+import os
+import sys
+from pathlib import Path
+
+# Get the absolute path to the project root
+PROJECT_ROOT = Path(__file__).parent.parent.absolute()
+sys.path.insert(0, str(PROJECT_ROOT))
+
+# Rest of the imports
 import streamlit as st
 from services.db_services import DbServices
 # Comment out the import since we're ignoring authentication
 # from config import get_authenticated_service
 from services.backend_services import BackendServices
-import os
 import tempfile
-import sys
-from pathlib import Path
-
-# Add the project root directory to Python path
-sys.path.append(str(Path(__file__).parent.parent))
-
+import asyncio
 from input_handling.input_processor import InputProcessor
 from content_generation.content_generation import main as generate_content_variations
+from speech_generation.generate_audio import AudioGenerator
 
+# Add at the top with other constants
+DEMO_MODE = False  # Set to False for actual backend processing
+DEMO_ASSETS_DIR = Path(__file__).parent / "demo_assets"
+OUTPUTS_DIR = Path(__file__).parent / "outputs"
 
 def main():
     # Sidebar navigation
@@ -86,27 +94,44 @@ def main():
                                 with st.spinner("Generating viral variations..."):
                                     variations = generate_content_variations(transcription)
                                     
-                                    # Display generated variations
-                                    st.markdown("### Generated Content Variations")
-                                    for i, variation in enumerate(variations, 1):
-                                        with st.expander(f"Variation {i}", expanded=True):
-                                            # Display transcription
-                                            st.markdown("#### Script")
-                                            for segment in variation['transcription']:
-                                                st.markdown(f"**{segment['speaker']}:** {segment['text']}")
-                                            
-                                            # Display voice descriptions
-                                            st.markdown("#### Voice Descriptions")
-                                            for speaker, desc in variation['speaker_voice_descriptions'].items():
-                                                st.markdown(f"**{speaker}:** {desc}")
-                                            
-                                            # Display metadata
-                                            st.markdown("#### Content Details")
-                                            st.markdown(f"**Title:** {variation['params']['title']}")
-                                            st.markdown(f"**Description:** {variation['params']['description']}")
-                                            st.markdown(f"**Modifications:** {variation['params']['modifications']}")
-                                            st.markdown(f"**Summary:** {variation['params']['short_modifications']}")
-                                            st.markdown(f"**ID:** {variation['params']['id']}")
+                                    # Create temporary directory for audio files
+                                    with tempfile.TemporaryDirectory() as temp_audio_dir:
+                                        # Process variations to audio
+                                        with st.spinner("Generating audio for variations..."):
+                                            audio_results = asyncio.run(
+                                                process_variations_to_audio(variations, temp_audio_dir)
+                                            )
+                                        
+                                        # Display generated variations with audio
+                                        st.markdown("### Generated Content Variations")
+                                        for i, (variation, audio_result) in enumerate(zip(variations, audio_results), 1):
+                                            with st.expander(f"Variation {i}", expanded=True):
+                                                # Display transcription
+                                                st.markdown("#### Script")
+                                                for segment in variation['transcription']:
+                                                    st.markdown(f"**{segment['speaker']}:** {segment['text']}")
+                                                
+                                                # Display voice descriptions
+                                                st.markdown("#### Voice Descriptions")
+                                                for speaker, desc in variation['speaker_voice_descriptions'].items():
+                                                    st.markdown(f"**{speaker}:** {desc}")
+                                                
+                                                # Display metadata
+                                                st.markdown("#### Content Details")
+                                                st.markdown(f"**Title:** {variation['params']['title']}")
+                                                st.markdown(f"**Description:** {variation['params']['description']}")
+                                                st.markdown(f"**Modifications:** {variation['params']['modifications']}")
+                                                st.markdown(f"**Summary:** {variation['params']['short_modifications']}")
+                                                st.markdown(f"**ID:** {variation['params']['id']}")
+                                                
+                                                # Display audio player
+                                                audio_path = list(audio_result.keys())[0]  # Get the audio file path
+                                                with open(audio_path, 'rb') as audio_file:
+                                                    st.audio(audio_file.read(), format='audio/mp3')
+                                                
+                                                # Display timing alignments
+                                                st.markdown("#### Audio Timing Alignments")
+                                                st.json(list(audio_result.values())[0])  # Show timing alignments
                             else:
                                 st.error("Failed to process content. Please try again.")
 
@@ -151,6 +176,75 @@ def main():
                         )
                         st.write("### Detailed Analytics")
                         st.json(video_details)
+
+
+async def process_variations_to_audio(variations, output_dir):
+    """
+    Convert content variations to audio files.
+    
+    Args:
+        variations (List[Dict]): List of content variations
+        output_dir (str): Directory to save audio files
+    
+    Returns:
+        List[Dict]: List of audio results with paths and timing alignments
+    """
+    if DEMO_MODE:
+        # Check for demo audio files in demo_assets directory
+        demo_results = []
+        for i, variation in enumerate(variations):
+            demo_file = DEMO_ASSETS_DIR / f"demo_variation_{i+1}.mp3"
+            if demo_file.exists():
+                # Return demo file path and mock timing alignments
+                demo_results.append({
+                    str(demo_file): {
+                        "timing_alignments": [
+                            {"start": 0, "end": 5, "text": "Demo audio segment"}
+                        ]
+                    }
+                })
+            else:
+                st.warning(f"Demo file {demo_file} not found. Please ensure demo assets are in place.")
+        return demo_results
+    
+    # Real processing mode
+    output_path = Path(output_dir)
+    if not output_path.exists():
+        output_path.mkdir(parents=True)
+        
+    # Reformat the data for the audio generator
+    audio_data = []
+    for variation in variations:
+        speaker_descriptions = [
+            {"speaker": speaker, "description": desc}
+            for speaker, desc in variation['speaker_voice_descriptions'].items()
+        ]
+        
+        audio_data.append({
+            "transcription": variation['transcription'],
+            "speaker_voice_descriptions": speaker_descriptions
+        })
+    
+    # Initialize audio generator and generate audio
+    audio_gen = AudioGenerator()
+    results = await audio_gen.generate_audio_from_transcriptions(
+        data=audio_data,
+        output_dir=str(output_path),
+        pause_duration_ms=500,
+        preset_voices=False
+    )
+    
+    # Save results to outputs directory with meaningful names
+    if not OUTPUTS_DIR.exists():
+        OUTPUTS_DIR.mkdir(parents=True)
+        
+    for i, result in enumerate(results):
+        audio_path = list(result.keys())[0]
+        new_path = OUTPUTS_DIR / f"variation_{i+1}_{Path(audio_path).name}"
+        Path(audio_path).rename(new_path)
+        results[i] = {str(new_path): result[audio_path]}
+    
+    return results
 
 
 if __name__ == "__main__":
