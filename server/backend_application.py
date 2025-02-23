@@ -6,6 +6,7 @@ from input_handling.input_helpers import extract_audio_from_video
 from input_handling.speech_to_text import SpeechToText
 from speech_generation.generate_audio import AudioGenerator
 from content_generation import main as cg
+from video_fillers.final_pipeline import main as media_generation
 from fastapi.responses import JSONResponse
 from fastapi import UploadFile, File
 from fastapi import FastAPI, HTTPException
@@ -47,7 +48,8 @@ async def transcribe_and_generate(file: UploadFile = File(...)):
         # Generate audio from content
         audio_generator = AudioGenerator()
         output_dir = "output"
-        lst = audio_generator.generate_audio_from_transcriptions(content, output_dir)
+        mp3_and_timestamps = audio_generator.generate_audio_from_transcriptions(content, output_dir)
+        media_generation(mp3_and_timestamps) #! Should take args, presumably from the last step
 
         return JSONResponse(content={"message": "Content generated successfully", "output_file": lst})
 

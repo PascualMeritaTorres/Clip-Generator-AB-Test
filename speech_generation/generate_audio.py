@@ -45,10 +45,11 @@ class AudioGenerator:
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
 
+        results = []
+
         for idx, entry in enumerate(data):
             combined_audio = AudioSegment.silent(duration=0)  # Start with empty audio
             transcription = entry["transcription"]
-            results = []
 
             for i, segment in enumerate(transcription):
                 speaker = segment["speaker"]
@@ -69,12 +70,16 @@ class AudioGenerator:
             # Export final concatenated audio
             final_audio_path = os.path.join(output_dir, f"transcription_{idx}.mp3")
             combined_audio.export(final_audio_path, format="mp3")
-            results.append({final_audio_path: response["alignment"]})
+            segment_alignments = []
+            for segment in transcription:
+                response = await self._generate_audio(voice_id=self.voices[segment["speaker"]], text=segment["text"])
+                segment_alignments.append(response["alignment"])
+            results.append({final_audio_path: segment_alignments})
 
-        # Dump the results to a JSON file
-        results_path = os.path.join(output_dir, "mp3_timestamps.json")
-        with open(results_path, 'w') as results_file:
-            json.dump(results, results_file, indent=4)
+            # Dump the results to a JSON file periodically
+            results_path = os.path.join(output_dir, "mp3_timestamps.json")
+            with open(results_path, 'w') as results_file:
+                json.dump(results, results_file, indent=4)
 
         return results
 
