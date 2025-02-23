@@ -7,11 +7,11 @@ class SpeechToText:
     It is required to have a FAL_KEY set in the environment variables.
     """
     def transcribe_audio(self, audio_file) -> str:
-        result = asyncio.run(self._subscribe(audio_file))
+        result = asyncio.run(self._transcribe(audio_file))
         return result.get("text", "").strip()
 
-    async def _subscribe(self, audio_file):
-        audio_url = fal_client.upload_file(audio_file)
+    async def _transcribe(self, audio_file):
+        audio_url = await fal_client.upload_file(audio_file)
 
         handler = await fal_client.submit_async(
             "fal-ai/whisper",
