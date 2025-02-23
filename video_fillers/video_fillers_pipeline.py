@@ -127,6 +127,7 @@ async def main(audio_input: str, mp3_timestamps_file: str) -> str:
     
     # Verify final video exists before returning
     assert os.path.exists(final_video_path), f"Final video file not found: {final_video_path}"
+    print(f"Pipeline completed. Final video available at: {final_video_path}")
     return final_video_path
 
 if __name__ == "__main__":

@@ -46,7 +46,7 @@ def main():
         st.title("Welcome to Virl Labs")
         st.markdown(
             """
-        ### Transform Your Podcasts into Viral Short-Form Content
+        ### <span style="color: red;">Transform Your Podcasts into Viral Short-Form Content</span>
         
         Upload your podcast audio and let our AI:
         - 🎯 Extract the most engaging clips
@@ -55,7 +55,7 @@ def main():
         - 🖼️ Match with compelling visuals
         - 📊 A/B test performance
         - 🧠 Self-improve through performance analytics to optimize future content
-        """
+        """, unsafe_allow_html=True
         )
 
         # File uploader section
@@ -124,19 +124,11 @@ def main():
                                     transcription_data = json.load(f)
                                 with open(variations_file, "r", encoding="utf-8") as f:
                                     variations_data = json.load(f)
-                                transcription = transcription_data["content"][
-                                    "transcription"
-                                ]
-                                st.success(
-                                    f"Demo transcription loaded from {transcription_file}"
-                                )
+                                transcription = transcription_data["content"]["transcription"]
                                 st.markdown("### Transcription")
                                 st.text(transcription)
 
                                 variations = variations_data["variations"]
-                                st.success(
-                                    f"Demo variations loaded from {variations_file}"
-                                )
                             else:
                                 # Non-demo mode: process the uploaded audio file
                                 temp_path = None
@@ -415,75 +407,76 @@ def main():
                             st.json(video_details)
 
 
-async def process_variations_to_audio(variations, output_dir):
+async def process_variations_to_audio(variations: list, output_dir: str) -> list:
     """
     Convert content variations to audio files and process them through the video pipeline.
-
+    
+    If in demo mode and pre-saved demo files are available, load them.
+    Otherwise (or if demo assets are missing), process the variation in production mode.
+    
     Args:
-        variations (List[Dict]): List of content variations
-        output_dir (str): Directory to save audio files
-
+        variations (list): List of content variation dictionaries.
+        output_dir (str): Directory where audio files are saved.
+        
     Returns:
-        List[Dict]: List of results containing audio and video paths with alignments
+        list: A list of dictionaries with keys 'audio_path', 'alignments', and 'video_path'
+              indicating the generated results for each variation.
     """
-    if DEMO_MODE:
-        demo_results = []
-        for i, variation in enumerate(variations, 1):
-            # Define paths for demo files
-            demo_audio = DEMO_ASSETS_DIR / f"demo_variation_{i}.mp3"
-            demo_alignments = DEMO_ASSETS_DIR / f"demo_variation_{i}_alignments.json"
-            demo_video = DEMO_ASSETS_DIR / f"demo_variation_{i}_final.mp4"
-
-            try:
-                # Verify files exist
-                assert demo_audio.exists(), f"Demo audio file {demo_audio} not found"
-                assert (
-                    demo_alignments.exists()
-                ), f"Demo alignments file {demo_alignments} not found"
-
-                # Load alignments
-                with open(demo_alignments, "r") as f:
-                    alignments = json.load(f)
-
-                result = {
-                    "audio_path": str(demo_audio),
-                    "alignments": alignments,
-                    "video_path": str(demo_video) if demo_video.exists() else None,
-                }
-
-                demo_results.append(result)
-                st.success(f"Loaded demo files for variation {i}")
-
-            except (AssertionError, json.JSONDecodeError, OSError) as e:
-                st.error(f"Error loading demo files for variation {i}: {str(e)}")
-                continue
-
-        return demo_results
-
-    # Non-demo mode processing
     results = []
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
-
-    for i, variation in enumerate(variations):
-        variation_dir = output_path / f"variation_{i+1}"
+    
+    # Create an empty placeholder at the bottom of the page
+    status_container = st.empty()
+    status_container.info("Your content generation requests are being processing. Please wait...")
+    
+    for i, variation in enumerate(variations, 1):
+        if DEMO_MODE:
+            demo_audio = DEMO_ASSETS_DIR / f"demo_variation_{i}.mp3"
+            demo_alignments = DEMO_ASSETS_DIR / f"demo_variation_{i}_alignments.json"
+            demo_video = DEMO_ASSETS_DIR / f"demo_variation_{i}_final.mp4"
+            
+            if demo_audio.exists() and demo_alignments.exists():
+                try:
+                    with open(demo_alignments, 'r', encoding='utf-8') as f:
+                        alignments = json.load(f)
+                    
+                    result = {
+                        'audio_path': str(demo_audio),
+                        'alignments': alignments,
+                        'video_path': str(demo_video) if demo_video.exists() else None
+                    }
+                    
+                    results.append(result)
+                    # Skip to next variation if demo assets are successfully loaded
+                    continue
+                except (json.JSONDecodeError, OSError) as e:
+                    status_container.error(f"Error loading demo files for variation {i}: {str(e)}. Falling back to production processing.")
+            else:
+                status_container.info(f"Processing variation {i}")
+                
+        # Production (non-demo) processing or fallback when demo assets are not available
+        variation_dir = output_path / f"variation_{i}"
         variation_dir.mkdir(exist_ok=True)
-
-        # Generate audio
+        
         audio_gen = AudioGenerator()
+        # Assert input data consistency
+        assert isinstance(variation.get('speaker_voice_descriptions', {}), dict), \
+            "Variation's speaker_voice_descriptions must be a dictionary"
         speaker_descriptions = [
             {"speaker": speaker, "description": desc}
-            for speaker, desc in variation["speaker_voice_descriptions"].items()
+            for speaker, desc in variation.get('speaker_voice_descriptions', {}).items()
         ]
-
-        audio_data = [
-            {
-                "transcription": variation["transcription"],
-                "speaker_voice_descriptions": speaker_descriptions,
-            }
-        ]
-
+        
+        audio_data = [{
+            "transcription": variation.get('transcription', []),
+            "speaker_voice_descriptions": speaker_descriptions
+        }]
+        
         try:
+            # Update status message for each variation
+            status_container.info(f"Processing variation {i} of {len(variations)}...")
+            
             # Generate audio and get alignments
             audio_result = await audio_gen.generate_audio_from_transcriptions(
                 data=audio_data,
@@ -493,19 +486,20 @@ async def process_variations_to_audio(variations, output_dir):
             )
 
             if not audio_result:
-                st.error(f"Failed to generate audio for variation {i+1}")
+                status_container.error(f"Failed to generate audio for variation {i}")
                 continue
-
+                
+            # Ensure the result structure is valid (one key/value pair)
             audio_path = list(audio_result[0].keys())[0]
             alignments = list(audio_result[0].values())[0]
-
-            # Save alignments for future use
-            alignments_file = variation_dir / f"variation_{i+1}_alignments.json"
-            with open(alignments_file, "w") as f:
+            
+            # Save alignments to file
+            alignments_file = variation_dir / f"variation_{i}_alignments.json"
+            with open(alignments_file, 'w', encoding='utf-8') as f:
                 json.dump(alignments, f, indent=4)
-
-            # Create timestamps file for video pipeline
-            timestamps_file = variation_dir / f"timestamps.json"
+            
+            # Generate a timestamps file for the video pipeline
+            timestamps_file = variation_dir / "timestamps.json"
             timestamps_data = {
                 "words": [
                     {
@@ -516,50 +510,48 @@ async def process_variations_to_audio(variations, output_dir):
                     for segment in alignments
                 ]
             }
-
-            with open(timestamps_file, "w") as f:
+            
+            with open(timestamps_file, 'w', encoding='utf-8') as f:
                 json.dump(timestamps_data, f, indent=4)
 
             # Process through video pipeline
-            with st.spinner(f"Generating video for variation {i+1}..."):
+            with st.spinner(f"Generating video for variation {i}..."):
                 try:
                     final_video_path = await process_video_pipeline(
                         audio_path, str(timestamps_file)
                     )
-
-                    # Save to demo_assets for future demo mode use
-                    demo_audio = DEMO_ASSETS_DIR / f"demo_variation_{i+1}.mp3"
-                    demo_alignments = (
-                        DEMO_ASSETS_DIR / f"demo_variation_{i+1}_alignments.json"
-                    )
-                    demo_video = DEMO_ASSETS_DIR / f"demo_variation_{i+1}_final.mp4"
-
-                    # Copy files to demo_assets
+                    
+                    # Save generated files as demo assets for future use
                     import shutil
 
                     DEMO_ASSETS_DIR.mkdir(exist_ok=True)
-                    shutil.copy2(audio_path, demo_audio)
-                    shutil.copy2(alignments_file, demo_alignments)
-                    shutil.copy2(final_video_path, demo_video)
-
-                    results.append(
-                        {
-                            "audio_path": str(audio_path),
-                            "alignments": alignments,
-                            "video_path": str(final_video_path),
-                        }
-                    )
-
-                    st.success(f"Generated video for variation {i+1}")
-
+                    demo_audio_copy = DEMO_ASSETS_DIR / f"demo_variation_{i}.mp3"
+                    demo_alignments_copy = DEMO_ASSETS_DIR / f"demo_variation_{i}_alignments.json"
+                    demo_video_copy = DEMO_ASSETS_DIR / f"demo_variation_{i}_final.mp4"
+                    
+                    shutil.copy2(audio_path, demo_audio_copy)
+                    shutil.copy2(alignments_file, demo_alignments_copy)
+                    shutil.copy2(final_video_path, demo_video_copy)
+                    
+                    results.append({
+                        'audio_path': str(audio_path),
+                        'alignments': alignments,
+                        'video_path': str(final_video_path)
+                    })
+                    
+                    status_container.success(f"Generated video for variation {i}")
+                    
                 except Exception as e:
-                    st.error(f"Error generating video for variation {i+1}: {str(e)}")
+                    status_container.error(f"Error generating video for variation {i}: {str(e)}")
                     continue
 
         except Exception as e:
-            st.error(f"Error processing variation {i+1}: {str(e)}")
+            status_container.error(f"Error processing variation {i}: {str(e)}")
             continue
-
+            
+    # Clear the status message when done
+    status_container.empty()
+            
     return results
 
 
