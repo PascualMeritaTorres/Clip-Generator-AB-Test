@@ -21,11 +21,13 @@ from youtube_interaction.youtube_uploader import YoutubeUploader
 from youtube_interaction.config import get_authenticated_service
 from content_generation.content_generation import main as generate_content_variations
 from speech_generation.generate_audio import AudioGenerator
+from content_rating.content_rating import generate_rating
 
 # Add at the top with other constants
 DEMO_MODE = False  # Set to False for actual backend processing
 DEMO_ASSETS_DIR = Path(__file__).parent / "demo_assets"
 OUTPUTS_DIR = Path(__file__).parent / "outputs"
+
 
 def main():
     if "youtube_authenticated_client" not in st.session_state:
@@ -177,6 +179,17 @@ def main():
         # Get data from the database
         db_services = DbServices()
         db_data = db_services.get_db_data()
+        video_ids = [video["video_id"] for video in db_data.get("videos", [])]
+        video_ratings = db_services.get_video_ratings(
+            st.session_state.youtube_authenticated_client, video_ids
+        )
+        st.write(video_ratings)
+        total_views = sum([int(video["viewCount"]) for video in video_ratings.values()])
+        comment_counts = sum(
+            [int(video["commentCount"]) for video in video_ratings.values()]
+        )
+        rating_results = generate_rating(video_ratings)
+        st.write(rating_results)
 
         # Analytics Overview
         st.markdown("### Content Performance Overview")
@@ -191,9 +204,9 @@ def main():
             with col1:
                 st.metric("Total Clips", len(db_data.get("videos", [])))
             with col2:
-                st.metric("Best Performing", "2.1M views")
+                st.metric("Total Views", total_views)
             with col3:
-                st.metric("Avg. Engagement", "12.3%")
+                st.metric("Comment Count", comment_counts)
             with col4:
                 st.metric("A/B Tests Running", "5")
 
@@ -223,11 +236,11 @@ def main():
 async def process_variations_to_audio(variations, output_dir):
     """
     Convert content variations to audio files.
-    
+
     Args:
         variations (List[Dict]): List of content variations
         output_dir (str): Directory to save audio files
-    
+
     Returns:
         List[Dict]: List of audio results with paths and timing alignments
     """
@@ -238,54 +251,60 @@ async def process_variations_to_audio(variations, output_dir):
             demo_file = DEMO_ASSETS_DIR / f"demo_variation_{i+1}.mp3"
             if demo_file.exists():
                 # Return demo file path and mock timing alignments
-                demo_results.append({
-                    str(demo_file): {
-                        "timing_alignments": [
-                            {"start": 0, "end": 5, "text": "Demo audio segment"}
-                        ]
+                demo_results.append(
+                    {
+                        str(demo_file): {
+                            "timing_alignments": [
+                                {"start": 0, "end": 5, "text": "Demo audio segment"}
+                            ]
+                        }
                     }
-                })
+                )
             else:
-                st.warning(f"Demo file {demo_file} not found. Please ensure demo assets are in place.")
+                st.warning(
+                    f"Demo file {demo_file} not found. Please ensure demo assets are in place."
+                )
         return demo_results
-    
+
     # Real processing mode
     output_path = Path(output_dir)
     if not output_path.exists():
         output_path.mkdir(parents=True)
-        
+
     # Reformat the data for the audio generator
     audio_data = []
     for variation in variations:
         speaker_descriptions = [
             {"speaker": speaker, "description": desc}
-            for speaker, desc in variation['speaker_voice_descriptions'].items()
+            for speaker, desc in variation["speaker_voice_descriptions"].items()
         ]
-        
-        audio_data.append({
-            "transcription": variation['transcription'],
-            "speaker_voice_descriptions": speaker_descriptions
-        })
-    
+
+        audio_data.append(
+            {
+                "transcription": variation["transcription"],
+                "speaker_voice_descriptions": speaker_descriptions,
+            }
+        )
+
     # Initialize audio generator and generate audio
     audio_gen = AudioGenerator()
     results = await audio_gen.generate_audio_from_transcriptions(
         data=audio_data,
         output_dir=str(output_path),
         pause_duration_ms=500,
-        preset_voices=False
+        preset_voices=False,
     )
-    
+
     # Save results to outputs directory with meaningful names
     if not OUTPUTS_DIR.exists():
         OUTPUTS_DIR.mkdir(parents=True)
-        
+
     for i, result in enumerate(results):
         audio_path = list(result.keys())[0]
         new_path = OUTPUTS_DIR / f"variation_{i+1}_{Path(audio_path).name}"
         Path(audio_path).rename(new_path)
         results[i] = {str(new_path): result[audio_path]}
-    
+
     return results
 
 

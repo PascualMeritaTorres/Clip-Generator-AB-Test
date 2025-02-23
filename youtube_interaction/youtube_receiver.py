@@ -2,7 +2,8 @@ import os
 import json
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
-#from config import CLIENT_SECRETS_FILE, SCOPES, API_SERVICE_NAME, API_VERSION
+
+# from config import CLIENT_SECRETS_FILE, SCOPES, API_SERVICE_NAME, API_VERSION
 
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -30,7 +31,10 @@ class YoutubeReceiver:
             part="snippet,statistics,contentDetails", id=video_id
         )
         response = request.execute()
-        return response["items"][0]
+        if response["items"]:
+            return response["items"][0]["statistics"]
+        else:
+            return None
 
     def read_video_ids(self, file_path: str):
         with open(file_path, "r") as json_file:
