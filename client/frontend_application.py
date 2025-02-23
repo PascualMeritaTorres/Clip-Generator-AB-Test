@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from input_handling.input_processor import InputProcessor
+from content_generation.content_generation import main as generate_content_variations
 
 
 def main():
@@ -54,8 +55,12 @@ def main():
                 num_clips = st.slider("Number of clips to generate", 1, 10, 3)
                 variations_per_clip = st.slider("Variations per clip", 1, 5, 2)
             with col2:
-                platform = st.selectbox("Target Platform", ["TikTok", "YouTube Shorts", "Instagram Reels"])
-                content_style = st.selectbox("Content Style", ["Entertaining", "Educational", "News", "Commentary"])
+                platform = st.selectbox("Target Platform", 
+                                      ["YouTube Shorts", "TikTok", "Instagram Reels"],
+                                      index=0)  # Set YouTube Shorts as default
+                content_style = st.selectbox("Content Style", 
+                                           ["Educational", "Entertaining", "News", "Commentary"],
+                                           index=0)  # Set Educational as default
 
             # Create temporary file
             with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp_file:
@@ -69,24 +74,39 @@ def main():
                     if st.button("🚀 Generate Viral Variations"):
                         with st.spinner("Processing your content..."):
                             processor = InputProcessor()
-                            result = processor.process_input(temp_path, uploaded_file.type)
-                            if result:
+                            transcription = processor.process_input(temp_path, uploaded_file.type)
+                            if transcription:
                                 st.success("Content processed successfully!")
                                 
-                                # Display generated clips
-                                st.markdown("### Generated Content Variations")
-                                for i, clip in enumerate(result.get("clips", [])):
-                                    with st.expander(f"Clip {i+1}", expanded=True):
-                                        st.markdown(f"**Transcript:** {clip.get('transcript', 'N/A')}")
-                                        st.markdown(f"**Duration:** {clip.get('duration', 'N/A')}s")
-                                        if clip.get('audio_url'):
-                                            st.audio(clip['audio_url'])
-                                        
-                                        # Show variations
-                                        st.markdown("#### Variations")
-                                        for j, variation in enumerate(clip.get("variations", [])):
-                                            st.markdown(f"**Variation {j+1}**")
-                                            st.json(variation)
+                                # Display the transcription
+                                st.markdown("### Transcription")
+                                st.text(transcription)
+                                
+                                # Generate content variations
+                                with st.spinner("Generating viral variations..."):
+                                    variations = generate_content_variations(transcription)
+                                    
+                                    # Display generated variations
+                                    st.markdown("### Generated Content Variations")
+                                    for i, variation in enumerate(variations, 1):
+                                        with st.expander(f"Variation {i}", expanded=True):
+                                            # Display transcription
+                                            st.markdown("#### Script")
+                                            for segment in variation['transcription']:
+                                                st.markdown(f"**{segment['speaker']}:** {segment['text']}")
+                                            
+                                            # Display voice descriptions
+                                            st.markdown("#### Voice Descriptions")
+                                            for speaker, desc in variation['speaker_voice_descriptions'].items():
+                                                st.markdown(f"**{speaker}:** {desc}")
+                                            
+                                            # Display metadata
+                                            st.markdown("#### Content Details")
+                                            st.markdown(f"**Title:** {variation['params']['title']}")
+                                            st.markdown(f"**Description:** {variation['params']['description']}")
+                                            st.markdown(f"**Modifications:** {variation['params']['modifications']}")
+                                            st.markdown(f"**Summary:** {variation['params']['short_modifications']}")
+                                            st.markdown(f"**ID:** {variation['params']['id']}")
                             else:
                                 st.error("Failed to process content. Please try again.")
 
