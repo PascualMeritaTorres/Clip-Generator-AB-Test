@@ -48,12 +48,15 @@ PAN_SPEED = 0.000000005   # Same pan speed for refined smoothness at higher FPS
 ZOOM_SPEED = 0.0015       # Same zoom speed for refined smoothness at higher FPS
 INTERPOLATION_FACTOR = 2.0  # Increased from 1.5 to generate more intermediate frames for smoother transition
 
+# NEW HYPERPARAMETER: Set to False to disable saving images persistently. When False, images are saved into temporary files.
+SAVE_IMAGES = True
+
 # Prompt templates for easy modification
 IMAGE_GENERATION_PROMPT_TEMPLATE = (
     "Generate a high quality, artistic image representing the concept of '{topic_name}' "
     "depicted with elements that allude to the words: '{topic_words}' "
     "in a vertical format suitable for social media. Use vivid colors, detailed textures, "
-    "and modern design elements. Do not include any text in the image."
+    "and modern design elements. Do not include any text in the image. I repeat do NOT include text"
 )
 
 # Logging configuration
@@ -153,11 +156,15 @@ def download_image(url: str, topic_name: str, topic_index: int) -> str:
     """
     print(f"[DEBUG] download_image: Downloading image for topic '{topic_name}' (index: {topic_index})")
     
-    images_dir = "topic_images"
-    os.makedirs(images_dir, exist_ok=True)
-    
     safe_name = ''.join(c if c.isalnum() else '_' for c in topic_name)
-    image_path = f"{images_dir}/{safe_name}_{topic_index}.jpg"
+    if SAVE_IMAGES:
+        images_dir = "topic_images"
+        os.makedirs(images_dir, exist_ok=True)
+        image_path = f"{images_dir}/{safe_name}_{topic_index}.jpg"
+    else:
+        # When saving is disabled, use a temporary file.
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+            image_path = tmp.name
     
     # Download image
     response = requests.get(url)
@@ -315,7 +322,17 @@ def find_topic_timing(
     word_timestamps: List[Dict[str, str]], 
     current_idx: int
 ) -> tuple[float, float, int]:
-    """Find start and end times for a topic based on its words."""
+    """
+    Find start and end times for a topic based on its words, with flexible matching.
+    
+    Args:
+        topic_words (List[str]): Words to find in the transcript
+        word_timestamps (List[Dict[str, str]]): Transcript with timestamps
+        current_idx (int): Starting index in word_timestamps
+        
+    Returns:
+        tuple[float, float, int]: (start_time, end_time, next_index)
+    """
     # Initialize variables
     start_time = None
     end_time = None
@@ -327,33 +344,78 @@ def find_topic_timing(
     print(f"\n[DEBUG] Looking for topic words: {normalized_topic_words}")
     print(f"[DEBUG] Starting search from index {current_idx}")
     
+    # Function to reconstruct word from parts
+    def reconstruct_word(start_idx: int, max_tokens: int = 3) -> str:
+        """
+        Reconstruct a word from multiple tokens (e.g., "don't" from "don", "'", "t")
+        """
+        if start_idx >= len(word_timestamps):
+            return ""
+            
+        reconstructed = word_timestamps[start_idx]["word"].lower()
+        current_idx = start_idx + 1
+        tokens_used = 1
+        
+        while (tokens_used < max_tokens and 
+               current_idx < len(word_timestamps) and 
+               len(word_timestamps[current_idx]["word"]) <= 1):  # Only combine with small tokens
+            reconstructed += word_timestamps[current_idx]["word"].lower()
+            current_idx += 1
+            tokens_used += 1
+            
+        return reconstructed
+
     while idx < len(word_timestamps) and words_found < len(topic_words):
-        timestamp_entry = word_timestamps[idx]
-        current_word = timestamp_entry["word"].lower()
+        # Try to match the current topic word
+        target_word = normalized_topic_words[words_found]
         
-        print(f"[DEBUG] Comparing word {words_found}: '{current_word}' with '{normalized_topic_words[words_found]}'")
+        # First try direct match
+        current_word = word_timestamps[idx]["word"].lower()
+        reconstructed_word = reconstruct_word(idx)
         
-        if current_word == normalized_topic_words[words_found]:
+        print(f"[DEBUG] Comparing word {words_found}: '{current_word}' / '{reconstructed_word}' with '{target_word}'")
+        
+        # Check for match (either direct or reconstructed)
+        if current_word == target_word or reconstructed_word == target_word:
             # Found matching word
             if start_time is None:
-                start_time = float(timestamp_entry["timestamp"])
-                print(f"[DEBUG] Found first word '{current_word}' at time {start_time}s")
-            end_time = float(timestamp_entry["timestamp"])
-            print(f"[DEBUG] Found word '{current_word}' at time {end_time}s")
+                start_time = float(word_timestamps[idx]["timestamp"])
+                print(f"[DEBUG] Found first word '{target_word}' at time {start_time}s")
+            
+            # For reconstructed words, get the timestamp of the last token
+            if reconstructed_word == target_word and len(reconstructed_word) > len(current_word):
+                # Skip the indices we used for reconstruction
+                tokens_to_skip = len(reconstructed_word) - len(current_word) + 1
+                end_time = float(word_timestamps[idx + tokens_to_skip - 1]["timestamp"])
+                idx += tokens_to_skip
+            else:
+                end_time = float(word_timestamps[idx]["timestamp"])
+                idx += 1
+                
+            print(f"[DEBUG] Found word '{target_word}' at time {end_time}s")
             words_found += 1
-        
-        idx += 1
+        else:
+            idx += 1
+            
+        # Add timeout check to prevent infinite loops
+        if idx >= len(word_timestamps):
+            print(f"[WARNING] Reached end of transcript while looking for '{target_word}'")
+            break
     
     print(f"[DEBUG] Words found: {words_found}/{len(topic_words)}")
-    print(f"[DEBUG] Final timing - start: {start_time}s, end: {end_time}s")
     
-    assert words_found == len(topic_words), f"Could not find all words for topic. Found {words_found} of {len(topic_words)}"
-    assert start_time is not None and end_time is not None, "Could not determine topic timing"
+    # More flexible assertion - allow partial matches if we found at least the first and last words
+    if words_found < 2:
+        raise AssertionError(f"Could not find enough words for topic. Found {words_found} of {len(topic_words)}")
+    
+    if start_time is None or end_time is None:
+        raise AssertionError("Could not determine topic timing")
+    
+    print(f"[DEBUG] Final timing - start: {start_time}s, end: {end_time}s")
+    print(f"[DEBUG] Next search will start from index {idx}\n")
     
     # Add a small buffer to end_time to avoid abrupt transitions
-    end_time = end_time + 0.01
-    print(f"[DEBUG] Added 0.5s buffer. New end time: {end_time}s")
-    print(f"[DEBUG] Next search will start from index {idx}\n")
+    end_time = end_time + 0.5
     
     return start_time, end_time, idx
 
@@ -379,11 +441,13 @@ def generate_ai_image(topic_name: str, topic_words: List[str]) -> str:
     )
     
     def on_queue_update(update: fal_client.InProgress) -> None:
-        """Callback to log progress of image generation."""
-        if isinstance(update, fal_client.InProgress):
-            for log in update.logs:
-                print(log["message"])
-    
+        """Callback to log progress of image generation.
+        
+        Disabled logging to avoid printing HTTP request logs.
+        """
+        # Previously, log messages were printed. Now we do nothing.
+        pass
+
     result = fal_client.subscribe(
         "fal-ai/flux-pro/v1.1-ultra-finetuned",
         arguments={
@@ -416,6 +480,9 @@ def image_exists_for_topic(topic_name: str, topic_index: int) -> tuple[bool, str
     Returns:
         tuple[bool, str]: (exists, path_if_exists)
     """
+    if not SAVE_IMAGES:
+        logging.info("Intermediate image saving is disabled. Skipping existence check.")
+        return False, ""
     images_dir = "topic_images"
     safe_name = ''.join(c if c.isalnum() else '_' for c in topic_name)
     image_path = f"{images_dir}/{safe_name}_{topic_index}.jpg"

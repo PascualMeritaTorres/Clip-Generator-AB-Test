@@ -19,9 +19,13 @@ from openai import OpenAI
 import math
 import time  # <-- ADDED: Import time to measure processing duration
 import concurrent.futures
+import logging
+
+# NEW IMPORT: Load topics from generate_topics.py instead of generating them here
+from video_fillers.generate_topics import load_topics
 
 # Hyperparameter: Toggle saving of intermediate files (chunks, sound effects, topics, etc.)
-SAVE_INTERMEDIATE_FILES = False
+SAVE_INTERMEDIATE_FILES = True
 
 # Volume control parameters (in dB)
 MAIN_AUDIO_VOLUME_DB = 0  # 0 means no change, negative values reduce volume, positive values increase it
@@ -358,171 +362,62 @@ def normalize_text(text: str) -> str:
     text = ' '.join(text.split())
     return text
 
-def identify_topics(transcription: str) -> Dict[str, List[str]]:
+def get_sequential_topic_timestamps(topic_words, timestamp_data):
     """
-    Use Fal AI's Claude 3.5 Sonnet to identify topics and their associated words in chronological order.
-    The topics should split the transcription into sequential parts that can be reconstructed
-    to form the original text when concatenated in order.
+    Get start and end timestamps for each topic based on sequential word matching.
     
     Args:
-        transcription (str): Full text transcription
-        
+        topic_words (dict): Dictionary mapping topic names to lists of words
+        timestamp_data (list): List of dictionaries containing word and timestamp data
+    
     Returns:
-        Dict[str, List[str]]: Dictionary mapping topic names to word lists, where concatenating
-                             the word lists in order reconstructs the original transcription
-        
-    Raises:
-        AssertionError: If LLM response is invalid
-        RuntimeError: If multiple LLM attempts fail
+        dict: Dictionary mapping topic names to (start_time, end_time) tuples
     """
-    import fal_client
-    print("[DEBUG] identify_topics: Identifying topics from transcription")
-    base_prompt = f"""
-    Split this text into sequential topics, where each topic represents a distinct concept or idea that is being talked about.
-    The words in each topic must appear in the exact same order as in the original text.
-    When concatenating all the words from all topics in order, it must reconstruct the original text exactly.
-
-    Rules:
-    1. Each topic should be a single word and have a descriptive name that captures its meaning
-    2. The words in each topic must be taken sequentially from the text
-    3. Every word from the original text must be included exactly once
-    4. The order of topics must match the text flow
-    5. No adding, removing, or modifying words
-
-    Return ONLY a JSON where:
-    - Each key is a topic name (e.g., "spy", "surroundings", etc.)
-    - Each value is a list of the exact words from that section of text
+    def clean_word(word):
+        # Remove punctuation from word
+        return ''.join(c for c in word if c.isalnum() or c.isspace()).lower()
     
-    Example:
-    Text: "What is the one spy trick you would teach everyone"
-    Output: {{
-        "spy": ["What", "is", "the", "one", "spy", "trick", "you", "would", "teach", "everyone"],
-        "surroundings": ["I", "would", "teach", "everyone", "to", "always", "look", "at", "their", "surroundings"]
-    }}
-
-    Text: {transcription}
-    """
-    
-    max_attempts = 3
-    for attempt in range(max_attempts):
-        print(f"[DEBUG] identify_topics: Attempt {attempt + 1}")
-        try:
-            result = fal_client.subscribe(
-                "fal-ai/any-llm",
-                arguments={
-                    "model": "anthropic/claude-3.5-sonnet",
-                    "prompt": base_prompt + "\n\nRemember: Output only valid JSON." if attempt > 0 else base_prompt
-                }
-            )
-            
-            # Parse the output from the result
-            result_json = json.loads(result["output"])
-            assert isinstance(result_json, dict), "LLM response must be a dictionary"
-            
-            # Verify that concatenating all words reconstructs the original text
-            all_words = []
-            for words in result_json.values():
-                all_words.extend(words)
-            reconstructed_text = " ".join(all_words)
-            
-            # Normalize both texts for comparison
-            normalized_original = normalize_text(transcription)
-            normalized_reconstructed = normalize_text(reconstructed_text)
-            
-            # Compare normalized versions
-            assert normalized_reconstructed == normalized_original, \
-                f"Topics don't reconstruct original text exactly.\nOriginal (normalized): {normalized_original}\nReconstructed (normalized): {normalized_reconstructed}"
-            
-            print(f"[DEBUG] identify_topics: Topics identified: {list(result_json.keys())}")
-            # Conditionally save topics to file if enabled
-            if SAVE_INTERMEDIATE_FILES:
-                with open('identified_topics.json', 'w') as f:
-                    json.dump(result_json, f, indent=2)
-                print("[DEBUG] identify_topics: Saved identified topics to identified_topics.json")
-            else:
-                print("[DEBUG] identify_topics: Skipping saving identified topics file.")
-            
-            return result_json
-            
-        except (json.JSONDecodeError, AssertionError) as e:
-            print(f"[DEBUG] identify_topics: Attempt {attempt + 1} failed with error: {e}")
-            if attempt == max_attempts - 1:
-                raise RuntimeError(f"Failed to get valid JSON response after {max_attempts} attempts") from e
-            continue
-
-def get_sequential_topic_timestamps(
-    topic_words: Dict[str, List[str]], 
-    timestamp_data: List[Dict]
-) -> List[Topic]:
-    """
-    Get sequential timestamps for each topic based on their words.
-    
-    Args:
-        topic_words (Dict[str, List[str]]): Dictionary mapping topic names to their word lists
-        timestamp_data (List[Dict]): List of word timing data from the timestamp file
-        
-    Returns:
-        List[Topic]: List of Topic objects with start/end times in chronological order
-        
-    Raises:
-        AssertionError: If timestamp data is invalid or words can't be found
-    """
-    print("[DEBUG] get_sequential_topic_timestamps: Starting timestamp processing")
-    
-    # Validate inputs
-    assert isinstance(topic_words, dict), "topic_words must be a dictionary"
-    assert isinstance(timestamp_data, list), "timestamp_data must be a list"
-    assert all('word' in item and 'timestamp' in item for item in timestamp_data), \
-        "Each timestamp_data item must have 'word' and 'timestamp' keys"
-    
-    topics = []
-    words_processed = 0
-    current_time = 0.0
+    topic_timestamps = {}
     
     for topic_name, words in topic_words.items():
-        print(f"[DEBUG] Processing topic: {topic_name} with {len(words)} words")
+        logging.debug(f"Processing topic: {topic_name} with {len(words)} words")
         
-        # Find the last word of this topic
-        last_word = words[-1].lower()
+        # Clean the topic words
+        clean_topic_words = [clean_word(w) for w in words]
         
-        # Search for the first occurrence of the last word after words_processed
+        # Create cleaned timestamp words for matching
+        clean_timestamp_words = [clean_word(item['word']) for item in timestamp_data]
+        
+        start_time = None
         end_time = None
-        for item in timestamp_data[words_processed:]:
-            if item['word'].lower() == last_word:
-                end_time = float(item['timestamp'])
+        
+        # Find the first word
+        first_word = clean_topic_words[0]
+        last_word = clean_topic_words[-1]
+        
+        for i, item in enumerate(timestamp_data):
+            if clean_word(item['word']) == first_word:
+                start_time = float(item['timestamp'])
                 break
         
-        assert end_time is not None, f"Could not find timestamp for last word '{last_word}' in topic '{topic_name}'"
+        # Find the last word
+        for item in timestamp_data:
+            if clean_word(item['word']) == last_word:
+                end_time = float(item['timestamp'])
+                
+        assert start_time is not None, f"Could not find timestamp for first word '{words[0]}' in topic '{topic_name}'"
+        assert end_time is not None, f"Could not find timestamp for last word '{words[-1]}' in topic '{topic_name}'"
         
-        # Create Topic object
-        topic = Topic(
-            name=topic_name,
-            words=words,
-            start_time=current_time,
-            end_time=end_time
-        )
-        topics.append(topic)
-        
-        print(f"[DEBUG] Topic '{topic_name}' timing: {current_time:.2f}s to {end_time:.2f}s")
-        
-        # Update for next iteration
-        current_time = end_time
-        words_processed += len(words)
+        topic_timestamps[topic_name] = (start_time, end_time)
+        logging.debug(f"Topic '{topic_name}' timing: {start_time:.2f}s to {end_time:.2f}s")
     
-    # Validate the sequence
-    assert len(topics) > 0, "No topics were processed"
-    for i in range(1, len(topics)):
-        assert topics[i].start_time == topics[i-1].end_time, \
-            f"Gap between topics {topics[i-1].name} and {topics[i].name}"
-    
-    print(f"[DEBUG] get_sequential_topic_timestamps: Processed {len(topics)} topics")
-    return topics
+    return topic_timestamps
 
 def chunk_audio_by_topics(
     audio: AudioSegment,
     transcription: str,
     timestamp_file: str
-) -> List[AudioChunk]:
+) -> List['AudioChunk']:
     """
     Divide audio into chunks based on topic analysis with sequential timing.
     
@@ -542,19 +437,20 @@ def chunk_audio_by_topics(
     with open(timestamp_file, 'r') as f:
         timestamp_data = [json.loads(line) for line in f if line.strip()]
     
-    # Get topics and their words
-    topic_words = identify_topics(transcription)
+    # Instead of generating topics (with an LLM) here,
+    # load the pre-generated topics from the JSON file.
+    topic_words = load_topics()
     
     # Get sequential timestamps for all topics
     topics = get_sequential_topic_timestamps(topic_words, timestamp_data)
     
     chunks = []
-    for topic in topics:
-        print(f"[DEBUG] chunk_audio_by_topics: Creating chunk for topic '{topic.name}' from {topic.start_time}s to {topic.end_time}s")
+    for topic_name, (start_time, end_time) in topics.items():
+        print(f"[DEBUG] chunk_audio_by_topics: Creating chunk for topic '{topic_name}' from {start_time}s to {end_time}s")
         
         # Convert to milliseconds for pydub
-        start_ms = int(topic.start_time * 1000)
-        end_ms = int(topic.end_time * 1000)
+        start_ms = int(start_time * 1000)
+        end_ms = int(end_time * 1000)
         
         # Ensure we don't exceed audio length
         end_ms = min(end_ms, len(audio))
@@ -568,20 +464,20 @@ def chunk_audio_by_topics(
         
         # Create chunk object
         chunk = AudioChunk(
-            start_time=topic.start_time,
-            end_time=topic.end_time,
+            start_time=start_time,
+            end_time=end_time,
             audio_data=chunk_audio,
-            transcription=' '.join(topic.words)
+            transcription=' '.join(topic_words[topic_name])
         )
         
         # Conditionally save chunk to file if enabled
-        safe_topic_name = ''.join(c if c.isalnum() else '_' for c in topic.name)
-        chunk_filename = f"{chunks_dir}/chunk_{safe_topic_name}_{topic.start_time:.2f}_{topic.end_time:.2f}.mp3"
+        safe_topic_name = ''.join(c if c.isalnum() else '_' for c in topic_name)
+        chunk_filename = f"{chunks_dir}/chunk_{safe_topic_name}_{start_time:.2f}_{end_time:.2f}.mp3"
         if SAVE_INTERMEDIATE_FILES:
             chunk_audio.export(chunk_filename, format='mp3')
             print(f"[DEBUG] chunk_audio_by_topics: Exported chunk to {chunk_filename}")
         else:
-            print(f"[DEBUG] chunk_audio_by_topics: Skipping saving chunk file for topic {topic.name}.")
+            print(f"[DEBUG] chunk_audio_by_topics: Skipping saving chunk file for topic {topic_name}.")
         
         chunks.append(chunk)
     
