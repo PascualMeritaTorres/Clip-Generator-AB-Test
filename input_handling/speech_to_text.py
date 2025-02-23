@@ -1,5 +1,6 @@
 import asyncio
 import fal_client
+import time
 
 class SpeechToText:
     """Speech to Text class using the Fal client.
@@ -25,3 +26,13 @@ class SpeechToText:
         result = await handler.get()
 
         return result
+
+# if __name__ == "__main__":
+#     stt = SpeechToText()
+#     start_time = time.time()
+#     transcription = stt.transcribe_audio("Will An Asteroid Hit Earth in 2032.mp3")
+#     end_time = time.time()
+#     elapsed_time = end_time - start_time
+#     with open("Will An Asteroid Hit Earth in 2032.txt", "w") as f:
+#         f.write(transcription)
+#     print(f"Transcription completed in {elapsed_time:.2f} seconds")
