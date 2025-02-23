@@ -32,7 +32,12 @@ class YoutubeReceiver:
         )
         response = request.execute()
         if response["items"]:
+            #     for video_id, video_stats in db_videos.values():
+            #         if video_id == video_id:
+            #             video_stats["statistics"] = response["items"][0]["statistics"]
+            #             return video_stats
             return response["items"][0]["statistics"]
+
         else:
             return None
 

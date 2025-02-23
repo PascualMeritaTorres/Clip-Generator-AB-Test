@@ -367,13 +367,11 @@ def main():
         video_ratings = db_services.get_video_ratings(
             st.session_state.youtube_authenticated_client, video_ids
         )
-        st.write(video_ratings)
         total_views = sum([int(video["viewCount"]) for video in video_ratings.values()])
         comment_counts = sum(
             [int(video["commentCount"]) for video in video_ratings.values()]
         )
         rating_results = generate_rating(video_ratings)
-        st.write(rating_results)
 
         # Analytics Overview
         st.markdown("### Content Performance Overview")

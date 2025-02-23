@@ -2,11 +2,29 @@
     "videos": [
         {
             "video_id": "6fZ8hEQgXqE",
-            "video_name": "dummy_video.mp4#Shorts"
+            "video_name": "dummy_video.mp4#Shorts",
+            "transcription": "",
+            "appliedModifications": "",
+            "stats": {
+                "viewCount":"2",
+                "likeCount":"1",
+                "dislikeCount":"0",
+                "favoriteCount":"0",
+                "commentCount":"0"
+            }
         },
         {
             "video_id": "Icgtl2HIZjs",
-            "video_name": "dummy_video2.mp4#Shorts"
+            "video_name": "dummy_video2.mp4#Shorts",
+            "transcription": "",
+            "appliedModifications": "",
+            "stats": {
+                "viewCount":"5",
+                "likeCount":"1",
+                "dislikeCount":"0",
+                "favoriteCount":"0",
+                "commentCount":"0"
+            }
         }
     ]
 }
