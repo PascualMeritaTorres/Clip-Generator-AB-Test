@@ -49,6 +49,7 @@ class AudioGenerator:
         for idx, entry in enumerate(data):
             combined_audio = AudioSegment.silent(duration=0)  # Start with empty audio
             transcription = entry["transcription"]
+            results = []
 
             for i, segment in enumerate(transcription):
                 speaker = segment["speaker"]
@@ -69,9 +70,9 @@ class AudioGenerator:
             # Export final concatenated audio
             final_audio_path = os.path.join(output_dir, f"transcription_{idx}.mp3")
             combined_audio.export(final_audio_path, format="mp3")
-            output_files.append(final_audio_path)
+            results.append({final_audio_path: response["alignment"]})
 
-        return output_files
+        return results
 
     async def _generate_voices(self, data, preset_voices=False):
         start_time = time.time()
