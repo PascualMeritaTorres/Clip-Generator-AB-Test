@@ -40,7 +40,6 @@ class AudioGenerator:
 
     async def generate_audio_from_transcriptions(self, data, output_dir, pause_duration_ms=500, preset_voices=False):
         await self._generate_voices(data, preset_voices=preset_voices)  # Ensure voices are populated before generating audio
-        output_files = []
         silence = AudioSegment.silent(duration=pause_duration_ms)  # Create a silence segment
 
         if not os.path.exists(output_dir):
@@ -49,6 +48,7 @@ class AudioGenerator:
         for idx, entry in enumerate(data):
             combined_audio = AudioSegment.silent(duration=0)  # Start with empty audio
             transcription = entry["transcription"]
+            results = []
 
             for i, segment in enumerate(transcription):
                 speaker = segment["speaker"]
@@ -69,9 +69,14 @@ class AudioGenerator:
             # Export final concatenated audio
             final_audio_path = os.path.join(output_dir, f"transcription_{idx}.mp3")
             combined_audio.export(final_audio_path, format="mp3")
-            output_files.append(final_audio_path)
+            results.append({final_audio_path: response["alignment"]})
 
-        return output_files
+        # Dump the results to a JSON file
+        results_path = os.path.join(output_dir, "mp3_timestamps.json")
+        with open(results_path, 'w') as results_file:
+            json.dump(results, results_file, indent=4)
+
+        return results
 
     async def _generate_voices(self, data, preset_voices=False):
         start_time = time.time()
@@ -119,6 +124,6 @@ import asyncio
 
 if __name__ == "__main__":
     ag = AudioGenerator()
-    with open('transcription.json', 'r') as file:
+    with open('neil_small.json', 'r') as file:
         data = json.load(file)
     asyncio.run(ag.generate_audio_from_transcriptions(data, "audio_generation_output", preset_voices=True))
