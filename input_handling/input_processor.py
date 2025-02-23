@@ -77,23 +77,33 @@ class InputProcessor:
         Returns:
             dict: Transcription result from the Fal API
         """
-        audio_url = await fal_client.upload_file(audio_file)
+        assert isinstance(audio_file, str), "audio_file must be a string"
+        
+        try:
+            # Create new event loop for this context
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            audio_url = fal_client.upload_file(audio_file)
+            
+            result = await fal_client.subscribe_async(
+                "fal-ai/whisper",
+                arguments={
+                    "audio_url": audio_url,
+                    "task": "transcribe",
+                    "language": "en",
+                    "response_format": "text",
+                }
+            )
+            return result
+        except Exception as e:
+            raise RuntimeError(f"Failed to transcribe audio: {e}")
+        finally:
+            loop.close()
 
-        handler = await fal_client.submit_async(
-            "fal-ai/whisper",
-            arguments={
-                "audio_url": audio_url,
-                "task": "transcribe",
-                "language": "en",
-                "response_format": "text",
-            },
-        )
-
-        return await handler.get()
-
-    def transcribe_audio(self, audio_file: str) -> str:
+    async def transcribe_audio_async(self, audio_file: str) -> str:
         """
-        Transcribe audio file to text.
+        Async method to transcribe audio file to text.
         
         Args:
             audio_file (str): Path to the audio file
@@ -104,12 +114,33 @@ class InputProcessor:
         assert isinstance(audio_file, str), "audio_file must be a string"
         assert os.path.exists(audio_file), f"Audio file {audio_file} does not exist"
         
-        result = asyncio.run(self._transcribe(audio_file))
+        result = await self._transcribe(audio_file)
         return result.get("text", "").strip()
 
-    def process_input(self, file_path: str, file_type: str) -> Optional[str]:
+    def transcribe_audio(self, audio_file: str) -> str:
         """
-        Process different types of input files and return transcription if applicable.
+        Synchronous wrapper for transcribe_audio_async.
+        
+        Args:
+            audio_file (str): Path to the audio file
+            
+        Returns:
+            str: Transcribed text
+        """
+        try:
+            # Create new event loop
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            # Run the async function
+            result = loop.run_until_complete(self._transcribe(audio_file))
+            return result.get("text", "").strip()
+        finally:
+            loop.close()
+
+    async def process_input_async(self, file_path: str, file_type: str) -> Optional[str]:
+        """
+        Async version of process_input.
         
         Args:
             file_path (str): Path to the input file
@@ -117,9 +148,6 @@ class InputProcessor:
             
         Returns:
             Optional[str]: Transcription text if successful, None if processing fails
-            
-        Raises:
-            ValueError: If file type is not supported
         """
         assert isinstance(file_path, str), "file_path must be a string"
         assert isinstance(file_type, str), "file_type must be a string"
@@ -137,13 +165,57 @@ class InputProcessor:
                 self.extract_audio_from_video(file_path, audio_path)
                 
                 try:
-                    transcription = self.transcribe_audio(audio_path)
+                    transcription = await self.transcribe_audio_async(audio_path)
                 finally:
                     # Clean up temporary audio file
                     if os.path.exists(audio_path):
                         os.remove(audio_path)
                         
                 return transcription
+
+            # Handle audio files
+            elif file_type in SUPPORTED_AUDIO_TYPES:
+                return await self.transcribe_audio_async(file_path)
+
+            else:
+                raise ValueError(f"Unsupported file type: {file_type}")
+
+        except Exception as e:
+            print(f"Error processing file: {e}")
+            return None
+
+    def process_input(self, file_path: str, file_type: str) -> Optional[str]:
+        """
+        Process different types of input files and return transcription if applicable.
+        
+        Args:
+            file_path (str): Path to the input file
+            file_type (str): MIME type of the file
+            
+        Returns:
+            Optional[str]: Transcription text if successful, None if processing fails
+        """
+        assert isinstance(file_path, str), "file_path must be a string"
+        assert isinstance(file_type, str), "file_type must be a string"
+        assert os.path.exists(file_path), f"File {file_path} does not exist"
+        
+        try:
+            # Handle text files
+            if file_type in SUPPORTED_TEXT_TYPES:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    return f.read()
+
+            # Handle video files
+            elif file_type in SUPPORTED_VIDEO_TYPES:
+                audio_path = file_path.replace('.mp4', '.mp3')
+                self.extract_audio_from_video(file_path, audio_path)
+                
+                try:
+                    return self.transcribe_audio(audio_path)
+                finally:
+                    # Clean up temporary audio file
+                    if os.path.exists(audio_path):
+                        os.remove(audio_path)
 
             # Handle audio files
             elif file_type in SUPPORTED_AUDIO_TYPES:
