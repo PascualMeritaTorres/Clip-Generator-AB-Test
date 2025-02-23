@@ -19,6 +19,10 @@ import tempfile
 from PIL import Image
 import io
 import numpy as np
+import fal_client  # New import for AI image generation using Fal AI
+import time
+from functools import wraps
+import logging
 
 # Image parameters for vertical social media format (9:16 aspect ratio)
 IMAGE_WIDTH = 1080  # Width for vertical video
@@ -27,9 +31,9 @@ TRANSITION_DURATION = 1.0  # Duration of fade transition between images in secon
 MIN_IMAGE_DURATION = 3.0  # Minimum duration to show each image
 
 # Optimization constants
-TARGET_FPS = 30  # Standard for social media
+TARGET_FPS = 120  # Increased FPS for smoother transitions
 ENCODING_PRESET = 'ultrafast'  # Fastest encoding preset
-ENCODING_THREADS = 4  # Number of threads for encoding
+ENCODING_THREADS = 2  # Number of threads for encoding
 AUDIO_FPS = 44100  # Standard audio sampling rate
 
 # Update constants
@@ -39,8 +43,36 @@ AUDIO_BITRATE = '192k'  # Target audio bitrate
 
 # Ken Burns effect parameters
 ZOOM_START_SCALE = 1.0
-ZOOM_END_SCALE = 1.3
-ZOOM_DURATION = 15.0  # Duration of the zoom effect in seconds
+ZOOM_END_SCALE = 1.05  # Reduced from 1.3 for subtler effect
+PAN_SPEED = 0.000000005   # Same pan speed for refined smoothness at higher FPS
+ZOOM_SPEED = 0.0015       # Same zoom speed for refined smoothness at higher FPS
+INTERPOLATION_FACTOR = 2.0  # Increased from 1.5 to generate more intermediate frames for smoother transition
+
+# Prompt templates for easy modification
+IMAGE_GENERATION_PROMPT_TEMPLATE = (
+    "Generate a high quality, artistic image representing the concept of '{topic_name}' "
+    "depicted with elements that allude to the words: '{topic_words}' "
+    "in a vertical format suitable for social media. Use vivid colors, detailed textures, "
+    "and modern design elements. Do not include any text in the image."
+)
+
+# Logging configuration
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
+def timer_decorator(func):
+    """Decorator to measure and log the execution time of functions."""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        end_time = time.time()
+        duration = end_time - start_time
+        logging.info(f"{func.__name__} took {duration:.2f} seconds to execute")
+        return result
+    return wrapper
 
 @dataclass
 class TopicImage:
@@ -74,6 +106,7 @@ def find_env_file(start_path: str) -> str:
         current_path = os.path.dirname(current_path)
     raise FileNotFoundError("Could not find .env file in any parent directory")
 
+@timer_decorator
 def load_topics() -> List[tuple[str, List[str]]]:
     """
     Load topics from identified_topics.json file and preserve order.
@@ -99,47 +132,7 @@ def load_topics() -> List[tuple[str, List[str]]]:
     # Return the ordered list of tuples directly
     return topics_data
 
-def search_pixabay_image(topic_name: str, api_key: str) -> str:
-    """
-    Search for an image on Pixabay using the topic name.
-    
-    Args:
-        topic_name (str): Topic to search for
-        api_key (str): Pixabay API key
-        
-    Returns:
-        str: URL of the selected image
-        
-    Raises:
-        RuntimeError: If no suitable images found
-    """
-    print(f"[DEBUG] search_pixabay_image: Searching for images with topic: {topic_name}")
-    
-    # Convert topic name to URL-friendly search query
-    search_query = topic_name.replace(' ', '+')
-    print(search_query)
-    
-    base_url = "https://pixabay.com/api/"
-    params = {
-        "key": api_key,
-        "q": search_query,
-        "order": "popular"  # Get most popular images first
-    }
-    
-    response = requests.get(base_url, params=params)
-    response.raise_for_status()
-    
-    data = response.json()
-    hits = data.get("hits", [])
-    
-    if not hits:
-        raise RuntimeError(f"No images found for topic: {topic_name}")
-    
-    # Select the first image (highest relevance)
-    image_url = hits[0]["largeImageURL"]
-    print(f"[DEBUG] search_pixabay_image: Selected image URL: {image_url}")
-    return image_url
-
+@timer_decorator
 def download_image(url: str, topic_name: str, topic_index: int) -> str:
     """
     Download image from URL, process it to fit target dimensions, and save locally.
@@ -204,73 +197,107 @@ def download_image(url: str, topic_name: str, topic_index: int) -> str:
     print(f"[DEBUG] download_image: Saved processed image to {image_path}")
     return image_path
 
+@timer_decorator
 def create_video_from_images(
     topic_images: List[TopicImage],
     audio_path: str,
     output_path: str
 ) -> None:
     """
-    Create optimized video using FFmpeg with Ken Burns effect.
-    
-    Args:
-        topic_images: List of TopicImage objects containing image info
-        audio_path: Path to the audio file
-        output_path: Path where the output video will be saved
+    Create optimized video using FFmpeg with smooth Ken Burns effect.
     """
     print("[DEBUG] create_video_from_images: Creating video using FFmpeg")
     
     with tempfile.TemporaryDirectory() as temp_dir:
-        # Create FFmpeg concat file with absolute paths
+        # First, create individual video clips with Ken Burns effect
+        clip_paths = []
+        for i, topic_img in enumerate(topic_images):
+            duration = topic_img.end_time - topic_img.start_time
+
+            # Alternate pan directions deterministically based on clip index
+            if i % 4 == 0:
+                # Pan vertically upward: no horizontal movement
+                pan_x = None
+                pan_y = "up"
+            elif i % 4 == 1:
+                # Pan horizontally rightward: no vertical movement
+                pan_x = "right"
+                pan_y = None
+            elif i % 4 == 2:
+                # Pan vertically downward: no horizontal movement
+                pan_x = None
+                pan_y = "down"
+            else:  # i % 4 == 3
+                # Pan horizontally leftward: no vertical movement
+                pan_x = "left"
+                pan_y = None
+
+            # Calculate pan expressions based on direction
+            if pan_x is None:
+                x_expr = "'(iw - iw/zoom)/2'"
+            else:
+                x_expr = f"'iw/2 - (iw/zoom)/2{'+' if pan_x == 'right' else '-'}x*{PAN_SPEED}'"
+            
+            if pan_y is None:
+                y_expr = "'(ih - ih/zoom)/2'"
+            else:
+                y_expr = f"'ih/2 - (ih/zoom)/2{'+' if pan_y == 'down' else '-'}x*{PAN_SPEED}'"
+            
+            clip_path = os.path.join(temp_dir, f'clip_{i}.mp4')
+            clip_paths.append(clip_path)
+            
+            # Create individual clip with Ken Burns effect with more intermediate frames:
+            ffmpeg_cmd = [
+                'ffmpeg', '-y',
+                '-loop', '1',
+                '-i', topic_img.local_path,
+                '-t', str(duration),
+                '-vf', (
+                    f'scale={IMAGE_WIDTH}:{IMAGE_HEIGHT}:force_original_aspect_ratio=decrease,'
+                    f'pad={IMAGE_WIDTH}:{IMAGE_HEIGHT}:(ow-iw)/2:(oh-ih)/2,'
+                    f'zoompan=z=\'{ZOOM_START_SCALE}+{ZOOM_SPEED}*on\':'
+                    f'x={x_expr}:y={y_expr}:'
+                    f's={IMAGE_WIDTH}x{IMAGE_HEIGHT}:d={int(duration*TARGET_FPS*INTERPOLATION_FACTOR)},'
+                    f'fps={TARGET_FPS}'
+                ),
+                '-c:v', 'libx264',
+                '-preset', FFMPEG_PRESET,
+                '-b:v', VIDEO_BITRATE,
+                '-r', str(TARGET_FPS),
+                clip_path
+            ]
+            
+            subprocess.run(ffmpeg_cmd, check=True, capture_output=True, text=True)
+        
+        # Create concat file for processed clips
         concat_file = os.path.join(temp_dir, 'concat.txt')
         with open(concat_file, 'w') as f:
-            for topic_img in topic_images:
-                abs_path = os.path.abspath(topic_img.local_path)
-                duration = topic_img.end_time - topic_img.start_time
-                f.write(f"file '{abs_path}'\n")
-                f.write(f"duration {duration}\n")
+            for clip_path in clip_paths:
+                f.write(f"file '{clip_path}'\n")
         
-        abs_audio_path = os.path.abspath(audio_path)
-        
-        # Calculate zoompan parameters
-        frames_per_transition = int(ZOOM_DURATION * TARGET_FPS)
-        zoom_increment = (ZOOM_END_SCALE - ZOOM_START_SCALE) / frames_per_transition
-        
-        # FFmpeg command with zoompan effect using defined scale constants
-        ffmpeg_cmd = [
-            'ffmpeg',
-            '-y',
+        # Concatenate all clips and add audio
+        final_cmd = [
+            'ffmpeg', '-y',
             '-f', 'concat',
             '-safe', '0',
             '-i', concat_file,
-            '-i', abs_audio_path,
-            '-c:v', 'libx264',
+            '-i', audio_path,
+            '-c:v', 'libx264',             # Re-encode to apply consistent 120 FPS
             '-preset', FFMPEG_PRESET,
+            '-r', str(TARGET_FPS),
             '-b:v', VIDEO_BITRATE,
             '-c:a', 'aac',
             '-b:a', AUDIO_BITRATE,
-            '-r', str(TARGET_FPS),
-            '-vf', (
-                f'scale={IMAGE_WIDTH}:{IMAGE_HEIGHT}:force_original_aspect_ratio=decrease,'
-                f'pad={IMAGE_WIDTH}:{IMAGE_HEIGHT}:(ow-iw)/2:(oh-ih)/2,'
-                f'zoompan=z=\'if(eq(on,0),{ZOOM_START_SCALE},min({ZOOM_END_SCALE},zoom+{zoom_increment}))\':'
-                f'd={frames_per_transition}:'
-                f'x=\'iw/2-(iw/zoom/2)\':y=\'ih/2-(ih/zoom/2)\':'
-                f's={IMAGE_WIDTH}x{IMAGE_HEIGHT}'
-            ),
             '-shortest',
             output_path
         ]
         
-        print(f"[DEBUG] Running FFmpeg command: {' '.join(ffmpeg_cmd)}")
-        
         try:
-            result = subprocess.run(ffmpeg_cmd, check=True, capture_output=True, text=True)
+            result = subprocess.run(final_cmd, check=True, capture_output=True, text=True)
             print(f"[DEBUG] FFmpeg stdout: {result.stdout}")
             print(f"[DEBUG] create_video_from_images: Video saved to {output_path}")
         except subprocess.CalledProcessError as e:
             print(f"[ERROR] FFmpeg error: {e.stderr}")
-            with open(concat_file, 'r') as f:
-                print(f"[DEBUG] Concat file contents:\n{f.read()}")
             raise
 
 def get_word_timestamps(jsonl_path: str) -> List[Dict[str, str]]:
@@ -330,27 +357,96 @@ def find_topic_timing(
     
     return start_time, end_time, idx
 
+@timer_decorator
+def generate_ai_image(topic_name: str, topic_words: List[str]) -> str:
+    """
+    Generate an image for a given topic using AI text-to-image model via Fal AI.
+    
+    Args:
+        topic_name (str): The topic to generate the image for.
+        topic_words (List[str]): The actual words being said in the topic.
+    
+    Returns:
+        str: URL of the generated image.
+        
+    Raises:
+        AssertionError: If generation does not return a valid image URL.
+    """
+    # Build the prompt by including the topic words
+    prompt = IMAGE_GENERATION_PROMPT_TEMPLATE.format(
+        topic_name=topic_name,
+        topic_words=", ".join(topic_words)
+    )
+    
+    def on_queue_update(update: fal_client.InProgress) -> None:
+        """Callback to log progress of image generation."""
+        if isinstance(update, fal_client.InProgress):
+            for log in update.logs:
+                print(log["message"])
+    
+    result = fal_client.subscribe(
+        "fal-ai/flux-pro/v1.1-ultra-finetuned",
+        arguments={
+            "prompt": prompt,
+            "finetune_id": "",
+            "finetune_strength": 1.0
+        },
+        with_logs=True,
+        on_queue_update=on_queue_update
+    )
+    
+    # Ensure result is a dict with a valid 'images' key representing generated images
+    assert isinstance(result, dict), "Expected result to be a dictionary from fal_client.subscribe"
+    images = result.get("images")
+    assert isinstance(images, list) and len(images) > 0, "No images generated"
+    image_data = images[0]
+    image_url = image_data.get("url")
+    assert isinstance(image_url, str) and image_url, "Generated image URL is not valid"
+    return image_url
+
+@timer_decorator
+def image_exists_for_topic(topic_name: str, topic_index: int) -> tuple[bool, str]:
+    """
+    Check if an image already exists for the given topic.
+    
+    Args:
+        topic_name (str): Name of the topic
+        topic_index (int): Index of the topic
+        
+    Returns:
+        tuple[bool, str]: (exists, path_if_exists)
+    """
+    images_dir = "topic_images"
+    safe_name = ''.join(c if c.isalnum() else '_' for c in topic_name)
+    image_path = f"{images_dir}/{safe_name}_{topic_index}.jpg"
+    
+    exists = os.path.exists(image_path)
+    logging.info(f"Checking for existing image at {image_path}: {'Found' if exists else 'Not found'}")
+    
+    return exists, image_path
+
+@timer_decorator
 def process_video_with_images(
     audio_path: str,
     output_path: str
 ) -> None:
     """Main function to process audio into video with images."""
-    print("\n[DEBUG] process_video_with_images: Starting video creation process")
+    total_start_time = time.time()
+    logging.info("Starting video creation process")
     
     # Load environment variables
     try:
+        env_start_time = time.time()
         env_path = find_env_file(os.path.dirname(__file__))
         load_dotenv(env_path)
+        logging.info(f"Environment loading took {time.time() - env_start_time:.2f} seconds")
     except FileNotFoundError as e:
-        print(f"[ERROR] {e}")
+        logging.error(f"{e}")
         raise
-    
-    pixabay_key = os.getenv('PIXABAY_API_KEY')
-    assert pixabay_key is not None, "PIXABAY_API_KEY not found in environment variables"
     
     # Load topics and word timestamps
     topics_list = load_topics()
-    print(f"\n[DEBUG] Loaded topics: {[t[0] for t in topics_list]}")
+    logging.info(f"Loaded {len(topics_list)} topics")
     
     word_timestamps = get_word_timestamps("audio_to_timestamp.jsonl")
     
@@ -359,26 +455,33 @@ def process_video_with_images(
     current_idx = 0
     
     for topic_index, (topic_name, topic_words) in enumerate(topics_list):
-        print(f"\n[DEBUG] Processing topic: {topic_name} (index: {topic_index})")
-        print(f"[DEBUG] Topic words: {topic_words}")
+        topic_start_time = time.time()
+        logging.info(f"Processing topic {topic_index + 1}/{len(topics_list)}: {topic_name}")
         
         # Find timing for this topic
+        timing_start = time.time()
         start_time, end_time, current_idx = find_topic_timing(
             topic_words, 
             word_timestamps, 
             current_idx
         )
+        logging.info(f"Topic timing calculation took {time.time() - timing_start:.2f} seconds")
         
-        print(f"[DEBUG] Final topic timing - start: {start_time}s, end: {end_time}s")
-        print(f"[DEBUG] Duration: {end_time - start_time:.2f}s")
+        # Check if image already exists
+        image_exists, local_path = image_exists_for_topic(topic_name, topic_index)
         
-        # Search and download image
-        print(f"[DEBUG] Searching for image with topic: {topic_name}")
-        image_url = search_pixabay_image(topic_name, pixabay_key)
-        print(f"[DEBUG] Found image URL: {image_url}")
-        
-        local_path = download_image(image_url, topic_name, topic_index)
-        print(f"[DEBUG] Saved image to: {local_path}")
+        if not image_exists:
+            # Generate and download image using AI only if it doesn't exist
+            image_gen_start = time.time()
+            image_url = generate_ai_image(topic_name, topic_words)
+            logging.info(f"AI image generation took {time.time() - image_gen_start:.2f} seconds")
+            
+            download_start = time.time()
+            local_path = download_image(image_url, topic_name, topic_index)
+            logging.info(f"Image download and processing took {time.time() - download_start:.2f} seconds")
+        else:
+            logging.info(f"Using existing image for topic '{topic_name}' at {local_path}")
+            image_url = ""  # Empty string since we're using existing image
         
         topic_image = TopicImage(
             topic_name=topic_name,
@@ -389,12 +492,15 @@ def process_video_with_images(
             local_path=local_path
         )
         topic_images.append(topic_image)
-        print(f"[DEBUG] Added topic image to list. Total images: {len(topic_images)}")
+        logging.info(f"Total time for topic {topic_name}: {time.time() - topic_start_time:.2f} seconds")
     
-    print("\n[DEBUG] All topics processed. Creating final video...")
     # Create video
+    video_start_time = time.time()
     create_video_from_images(topic_images, audio_path, output_path)
-    print("[DEBUG] process_video_with_images: Video creation complete")
+    logging.info(f"Video creation took {time.time() - video_start_time:.2f} seconds")
+    
+    total_time = time.time() - total_start_time
+    logging.info(f"Total processing time: {total_time:.2f} seconds")
 
 if __name__ == "__main__":
     process_video_with_images(

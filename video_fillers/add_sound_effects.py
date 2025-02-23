@@ -18,6 +18,10 @@ import json
 from openai import OpenAI
 import math
 import time  # <-- ADDED: Import time to measure processing duration
+import concurrent.futures
+
+# Hyperparameter: Toggle saving of intermediate files (chunks, sound effects, topics, etc.)
+SAVE_INTERMEDIATE_FILES = False
 
 # Volume control parameters (in dB)
 MAIN_AUDIO_VOLUME_DB = 0  # 0 means no change, negative values reduce volume, positive values increase it
@@ -173,9 +177,12 @@ def generate_sound_effect(
     safe_prompt = ''.join(c if c.isalnum() else '_' for c in prompt[:30])  # First 30 chars
     effect_filename = f"{effects_dir}/effect_{safe_prompt}_{chunk_start_time:.2f}s.mp3"
     
-    # Save the effect
-    effect_audio.export(effect_filename, format='mp3')
-    print(f"[DEBUG] generate_sound_effect: Saved sound effect to {effect_filename}")
+    # Conditionally save the effect file if enabled
+    if SAVE_INTERMEDIATE_FILES:
+        effect_audio.export(effect_filename, format='mp3')
+        print(f"[DEBUG] generate_sound_effect: Saved sound effect to {effect_filename}")
+    else:
+        print(f"[DEBUG] generate_sound_effect: Skipping saving effect file.")
     
     print("[DEBUG] generate_sound_effect: Sound effect generated successfully.")
     return effect_bytes
@@ -285,8 +292,11 @@ def mix_effect_with_chunk(
     # Save the mixed version of the effect
     effects_dir = "sound_effects"
     mix_filename = f"{effects_dir}/mixed_effect_{chunk.start_time:.2f}s_at_{timing:.2f}s.mp3"
-    adjusted_effect_audio.export(mix_filename, format='mp3')
-    print(f"[DEBUG] mix_effect_with_chunk: Saved mixed effect to {mix_filename}")
+    if SAVE_INTERMEDIATE_FILES:
+        adjusted_effect_audio.export(mix_filename, format='mp3')
+        print(f"[DEBUG] mix_effect_with_chunk: Saved mixed effect to {mix_filename}")
+    else:
+        print(f"[DEBUG] mix_effect_with_chunk: Skipping saving mixed effect file.")
     
     # Convert timing from seconds to milliseconds for pydub
     offset_ms = int(timing * 1000)
@@ -305,6 +315,28 @@ def mix_effect_with_chunk(
         transcription=chunk.transcription
     )
     return new_chunk
+
+# New: Process an individual audio chunk concurrently.
+def process_chunk(chunk: AudioChunk, client: ElevenLabs) -> AudioChunk:
+    """
+    Process an individual audio chunk concurrently.
+    Generates a sound effect based on LLM output and mixes it with the chunk if applicable.
+    
+    Args:
+        chunk (AudioChunk): AudioChunk to process.
+        client (ElevenLabs): Initialized ElevenLabs client.
+        
+    Returns:
+        AudioChunk: Processed audio chunk with sound effect mixed in if needed.
+    """
+    prompt, timing = generate_effect_prompt(chunk)
+    if prompt:
+        print(f"[DEBUG] process_chunk: Sound effect prompt generated for chunk starting at {chunk.start_time} s.")
+        effect = generate_sound_effect(client, prompt, timing, chunk.start_time)
+        return mix_effect_with_chunk(chunk, effect, timing)
+    else:
+        print(f"[DEBUG] process_chunk: No sound effect needed for chunk starting at {chunk.start_time} s.")
+        return chunk
 
 def normalize_text(text: str) -> str:
     """
@@ -351,21 +383,21 @@ def identify_topics(transcription: str) -> Dict[str, List[str]]:
     When concatenating all the words from all topics in order, it must reconstruct the original text exactly.
 
     Rules:
-    1. Each topic should have a descriptive name that captures its meaning
+    1. Each topic should be a single word and have a descriptive name that captures its meaning
     2. The words in each topic must be taken sequentially from the text
     3. Every word from the original text must be included exactly once
     4. The order of topics must match the text flow
     5. No adding, removing, or modifying words
 
     Return ONLY a JSON where:
-    - Each key is a topic name (e.g., "spy tricks", "look at surroundings", etc.)
+    - Each key is a topic name (e.g., "spy", "surroundings", etc.)
     - Each value is a list of the exact words from that section of text
     
     Example:
     Text: "What is the one spy trick you would teach everyone"
     Output: {{
-        "spy tricks": ["What", "is", "the", "one", "spy", "trick", "you", "would", "teach", "everyone"],
-        "look at surroundings": ["I", "would", "teach", "everyone", "to", "always", "look", "at", "their", "surroundings"]
+        "spy": ["What", "is", "the", "one", "spy", "trick", "you", "would", "teach", "everyone"],
+        "surroundings": ["I", "would", "teach", "everyone", "to", "always", "look", "at", "their", "surroundings"]
     }}
 
     Text: {transcription}
@@ -402,9 +434,13 @@ def identify_topics(transcription: str) -> Dict[str, List[str]]:
                 f"Topics don't reconstruct original text exactly.\nOriginal (normalized): {normalized_original}\nReconstructed (normalized): {normalized_reconstructed}"
             
             print(f"[DEBUG] identify_topics: Topics identified: {list(result_json.keys())}")
-            # Save topics to file
-            with open('identified_topics.json', 'w') as f:
-                json.dump(result_json, f, indent=2)
+            # Conditionally save topics to file if enabled
+            if SAVE_INTERMEDIATE_FILES:
+                with open('identified_topics.json', 'w') as f:
+                    json.dump(result_json, f, indent=2)
+                print("[DEBUG] identify_topics: Saved identified topics to identified_topics.json")
+            else:
+                print("[DEBUG] identify_topics: Skipping saving identified topics file.")
             
             return result_json
             
@@ -538,11 +574,14 @@ def chunk_audio_by_topics(
             transcription=' '.join(topic.words)
         )
         
-        # Save chunk to file
+        # Conditionally save chunk to file if enabled
         safe_topic_name = ''.join(c if c.isalnum() else '_' for c in topic.name)
         chunk_filename = f"{chunks_dir}/chunk_{safe_topic_name}_{topic.start_time:.2f}_{topic.end_time:.2f}.mp3"
-        chunk_audio.export(chunk_filename, format='mp3')
-        print(f"[DEBUG] chunk_audio_by_topics: Exported chunk to {chunk_filename}")
+        if SAVE_INTERMEDIATE_FILES:
+            chunk_audio.export(chunk_filename, format='mp3')
+            print(f"[DEBUG] chunk_audio_by_topics: Exported chunk to {chunk_filename}")
+        else:
+            print(f"[DEBUG] chunk_audio_by_topics: Skipping saving chunk file for topic {topic.name}.")
         
         chunks.append(chunk)
     
@@ -609,19 +648,9 @@ def process_audio_with_effects(
     chunks = chunk_audio_by_topics(audio, transcription, timestamp_file)
     print(f"[DEBUG] process_audio_with_effects: {len(chunks)} chunks created.")
     
-    processed_chunks = []
-    for chunk in chunks:
-        print(f"[DEBUG] process_audio_with_effects: Processing chunk from {chunk.start_time} to {chunk.end_time}.")
-        prompt, timing = generate_effect_prompt(chunk)
-        if prompt:  # Only generate effect if needed
-            print("[DEBUG] process_audio_with_effects: Sound effect prompt generated. Proceeding to generate sound effect.")
-            effect = generate_sound_effect(client, prompt, timing, chunk.start_time)
-            processed_chunk = mix_effect_with_chunk(chunk, effect, timing)
-            processed_chunks.append(processed_chunk)
-        else:
-            print("[DEBUG] process_audio_with_effects: No sound effect prompt generated for this chunk, skipping sound effect generation.")
-            processed_chunks.append(chunk)
-        print(f"[DEBUG] process_audio_with_effects: Finished processing chunk from {chunk.start_time} to {chunk.end_time}.")
+    # Process chunks concurrently instead of sequentially
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        processed_chunks = list(executor.map(lambda chunk: process_chunk(chunk, client), chunks))
     
     # Combine processed chunks
     final_audio = AudioSegment.empty()
