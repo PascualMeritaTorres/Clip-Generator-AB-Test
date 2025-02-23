@@ -2,6 +2,9 @@ import fal_client
 import  json
 import numpy as np
 import asyncio
+import time
+import uuid
+
 modifications = {
     "tone": {
         "description": "Adjusting the tone of the conversation can help make the video more engaging. A more exciting, humorous, or dramatic tone can make the conversation feel more dynamic.",
@@ -85,7 +88,11 @@ def fill_prompt_AB_test(script,direction = ""):
     d = {
     'transcription' : '<enter edited script>',
     'speaker_voice_descriptions': {'<speaker_name':'<description>'},
-    'modifications' : '<modifications_used>'
+    'modifications' : '<modifications_used>',
+    'short_modifications': '<summarisation_of_modifications>',
+    'title': '<snappy_title>',
+    'description': '<short_description_with_hasthags>',
+    
     }
     
     l = f"""
@@ -98,7 +105,7 @@ You will receive a script in the form of an array of dictionaries, with the keys
 Your response shall be a dictionary with two keys: 
 {d}
 
-Provide your edited text in the same exact format as you are given it in the "transcription" key. Also give a short description of how you imagine the speakers voice as well, make sure you add identifiable information like sex, depth of voice, and emotions you want to convey. It should be a short and sweet description. Provide a list of modifications applied to the initial script in the appropiate section in your reponse. Provide no additional information but this data structure. Do not add indications that are visual, focus on the dialogue and make sure to get the emotions in the text they are going to read out loud only, do not add any onomatopoeia or indications of actions, or activity, just focus what would be spoken and nothing else. 
+Provide your edited text in the same exact format as you are given it in the "transcription" key. Also give a short description of how you imagine the speakers voice as well, make sure you add identifiable information like sex, depth of voice, and emotions you want to convey. It should be a short and sweet description. Provide a list of modifications applied to the initial script in the appropiate section in your reponse. The next field should be a very short description of these modifications. Also, provide a title for the clip which is snappy and reflects the feeling of the clip, add all the emojis you want to this as well. A longer description should be created with a similar intention with the addition of hastags which can be used to identify this viral clip. Provide no additional information but this data structure. Do not add indications that are visual, focus on the dialogue and make sure to get the emotions in the text they are going to read out loud only, do not add any onomatopoeia or indications of actions, or activity, just focus what would be spoken and nothing else. 
 
 The original script is:
 {script}
@@ -223,4 +230,52 @@ async def get_initial_AB_candidates(transcription, clip_length=300, n_distinct_c
     )
     # candidate_clips should be a list of valid clips.
     async for ab_clip in get_AB_candidates(candidate_clips, n_ab_clips=n_ab_clips):
-        yield ab_clip
+        ab_clip_reformat = {}
+        for k,v in ab_clip.items():
+            if k in ['transcription','speaker_voice_descriptions']:
+                ab_clip_reformat[k] = v
+            else:
+                if 'params' not in ab_clip_reformat.keys():
+                    ab_clip_reformat['params'] = {}
+                ab_clip_reformat['params'][k] = v
+
+
+        ab_clip_reformat['params']['id'] = str(uuid.uuid4())
+            
+        yield ab_clip_reformat
+
+
+
+def main(transcription):
+    """Synchronous main function that reads AB candidates as they come."""
+    candidates = []
+    now = time.time()
+    
+    # Create or get an event loop
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    # Get the asynchronous generator from get_initial_AB_candidates.
+    agen = get_initial_AB_candidates(transcription, clip_length=100)
+    
+    while True:
+        try:
+            # Retrieve the next candidate from the async generator.
+            candidate = loop.run_until_complete(agen.__anext__())
+            print("Received an AB candidate:", candidate)
+            candidates.append(candidate)
+            print("Elapsed time:", time.time() - now)
+            now = time.time()
+        except StopAsyncIteration:
+            # No more candidates.
+            break
+    
+    return candidates
+
+if __name__ == "__main__":
+    # Replace this with your actual transcription or script.
+    transcription = "This is a creative treat, imagine any content you would like and make a clip out of it."
+    
+    # Call the synchronous main function.
+    all_candidates = main(transcription)
+    print("Final candidates:", all_candidates)
