@@ -6,6 +6,7 @@ Each line in the JSONL file should contain a word and a timestamp.
 import json
 from moviepy import *
 from typing import List, Dict, Any
+import os
 
 # Hyperparameters
 FONT_FILE = "Source_Sans_3/static/SourceSans3-Bold.ttf"  # Path to a TTF font file
@@ -100,7 +101,7 @@ def create_text_clips(captions: List[Dict[str, Any]], video_height: int) -> List
         text_clips.append(text_clip)
     return text_clips
 
-def overlay_text_on_video(input_video: str, transcription_path: str, output_video: str) -> None:
+def overlay_text_on_video(input_video: str, transcription_path: str, output_video: str) -> str:
     """
     Overlays text on the video using MoviePy.
     
@@ -108,10 +109,18 @@ def overlay_text_on_video(input_video: str, transcription_path: str, output_vide
         input_video (str): Path to the input video.
         transcription_path (str): Path to the transcription JSONL file.
         output_video (str): Path where the output video will be saved.
+        
+    Returns:
+        str: Path to the output video file with overlaid text.
     """
     print(f"Processing video: {input_video}")
     print(f"Using transcription: {transcription_path}")
     print(f"Output will be saved to: {output_video}")
+    
+    # Validate input files exist
+    assert os.path.exists(input_video), f"Input video not found: {input_video}"
+    assert os.path.exists(transcription_path), f"Transcription file not found: {transcription_path}"
+    
     video = VideoFileClip(input_video)
     captions = load_transcription(transcription_path)
     text_clips = create_text_clips(captions, video.h)
@@ -119,6 +128,11 @@ def overlay_text_on_video(input_video: str, transcription_path: str, output_vide
     final_video = CompositeVideoClip([video] + text_clips)
     final_video.write_videofile(output_video, codec="libx264", audio_codec="aac")
     print(f"Video saved as {output_video}")
+    
+    # Verify output file was created
+    assert os.path.exists(output_video), f"Failed to create output video: {output_video}"
+    
+    return output_video
 
 if __name__ == "__main__":
     overlay_text_on_video(INPUT_VIDEO, TRANSCRIPTION_PATH, OUTPUT_VIDEO) 

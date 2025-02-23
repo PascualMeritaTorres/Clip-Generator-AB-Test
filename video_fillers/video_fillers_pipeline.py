@@ -26,11 +26,12 @@ from video_fillers.preprocess_input import process_timestamps
 from video_fillers.generate_topics import generate_topics
 from video_fillers.add_sound_effects import process_audio_with_effects, save_audio
 from video_fillers.add_images import process_video_with_images
-from video_fillers.add_text_overlay import process_video_with_text_overlay
+from video_fillers.overlay_text_on_video import overlay_text_on_video
 
 # Hyperparameters / file constants
-AUDIO_INPUT: str = "audio.mp3"
-MP3_TIMESTAMPS_FILE: str = "timestamps.json"
+AUDIO_INPUT: str = "audio.mp3" # must be passed asan input
+MP3_TIMESTAMPS_FILE: str = "timestamps.json" # must be passed as an input
+
 TIMESTAMP_FILE: str = "audio_to_timestamp.jsonl"
 TRANSCRIPTION_FILE: str = "audio_transcription.jsonl"
 TOPICS_OUTPUT_FILE: str = "identified_topics.json"
@@ -42,21 +43,30 @@ FINAL_VIDEO: str = "final_video_with_text.mp4"
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 
-async def main() -> None:
-    """Orchestrates the full video creation pipeline."""
+async def main(audio_input: str, mp3_timestamps_file: str) -> str:
+    """
+    Orchestrates the full video creation pipeline.
+    
+    Args:
+        audio_input (str): Path to the input audio file
+        mp3_timestamps_file (str): Path to the JSON file containing MP3 timestamps
+        
+    Returns:
+        str: Path to the final output video file with all effects and overlays
+    """
     # Record overall start time
     total_start = time.time()
 
     # Validate input files exist
-    assert os.path.exists(AUDIO_INPUT), f"Audio file not found: {AUDIO_INPUT}"
-    assert os.path.exists(MP3_TIMESTAMPS_FILE), f"MP3 timestamps file not found: {MP3_TIMESTAMPS_FILE}"
+    assert os.path.exists(audio_input), f"Audio file not found: {audio_input}"
+    assert os.path.exists(mp3_timestamps_file), f"MP3 timestamps file not found: {mp3_timestamps_file}"
 
     # Step 0: Preprocess MP3 timestamps to create word timestamps and transcription
     preprocess_start_time = time.time()
     logging.info("Preprocessing MP3 timestamps...")
     timestamp_path, transcription_path = await asyncio.to_thread(
         process_timestamps, 
-        MP3_TIMESTAMPS_FILE, 
+        mp3_timestamps_file, 
         "."  # Use current directory
     )
     preprocess_time = time.time() - preprocess_start_time
@@ -96,19 +106,37 @@ async def main() -> None:
     # Use the sound effects audio as input for the video generation.
     images_start_time = time.time()
     logging.info("Generating video with images...")
-    await asyncio.to_thread(process_video_with_images, AUDIO_INPUT, VIDEO_WITH_IMAGES)
+    await asyncio.to_thread(process_video_with_images, audio_input, VIDEO_WITH_IMAGES)
     images_time = time.time() - images_start_time
     logging.info(f"Video with images saved to {VIDEO_WITH_IMAGES}. Time taken: {images_time:.2f} seconds.")
 
     # Step 4: Overlay transcription text (captions) onto the video.
     overlay_start_time = time.time()
     logging.info("Adding text overlay to the video...")
-    await asyncio.to_thread(process_video_with_text_overlay, VIDEO_WITH_IMAGES, timestamp_path, FINAL_VIDEO)
+    final_video_path = await asyncio.to_thread(
+        overlay_text_on_video,
+        VIDEO_WITH_IMAGES,  # input video 
+        timestamp_path,     # transcription path
+        FINAL_VIDEO        # output video
+    )
     overlay_time = time.time() - overlay_start_time
-    logging.info(f"Final video with text overlay saved to {FINAL_VIDEO}. Time taken: {overlay_time:.2f} seconds.")
+    logging.info(f"Final video with text overlay saved to {final_video_path}. Time taken: {overlay_time:.2f} seconds.")
 
     total_time = time.time() - total_start
     logging.info(f"Total processing time: {total_time:.2f} seconds.")
+    
+    # Verify final video exists before returning
+    assert os.path.exists(final_video_path), f"Final video file not found: {final_video_path}"
+    return final_video_path
 
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    # Check if required arguments are provided
+    if len(sys.argv) != 3:
+        print("Usage: python final_pipeline.py <audio_input_path> <mp3_timestamps_path>")
+        sys.exit(1)
+        
+    audio_input_path = sys.argv[1]
+    mp3_timestamps_path = sys.argv[2]
+    
+    final_video = asyncio.run(main(audio_input_path, mp3_timestamps_path))
+    print(f"Pipeline completed. Final video available at: {final_video}") 
